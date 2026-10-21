@@ -1,0 +1,189 @@
+{
+  "rarity": "common",
+  "tradeable": true,
+  "texture": "myavalon:avalon",
+  "translation": "deck.myavalon.avalon",
+  "suits": [
+    {
+      "suit": "myavalon:good",
+      "texture": "myavalon:good",
+      "translation": "suit.myavalon.good"
+    },
+    {
+      "suit": "myavalon:evil",
+      "texture": "myavalon:evil",
+      "translation": "suit.myavalon.evil"
+    },
+    {
+      "suit": "myavalon:vote",
+      "texture": "myavalon:vote",
+      "translation": "suit.myavalon.vote"
+    },
+    {
+      "suit": "myavalon:quest",
+      "texture": "myavalon:quest",
+      "translation": "suit.myavalon.quest"
+    },
+    {
+      "suit": "myavalon:token",
+      "texture": "myavalon:token",
+      "translation": "suit.myavalon.token"
+    }
+  ],
+  "cards": [
+    {
+      "card": {
+        "components": {
+          "charta:suit": "myavalon:good",
+          "charta:rank": "myavalon:merlin",
+          "charta:flipped": false
+        }
+      },
+      "texture": "myavalon:role/merlin",
+      "translation": "card.myavalon.merlin"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "myavalon:good",
+          "charta:rank": "myavalon:percival",
+          "charta:flipped": false
+        }
+      },
+      "texture": "myavalon:role/percival",
+      "translation": "card.myavalon.percival"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "myavalon:good",
+          "charta:rank": "myavalon:loyalist",
+          "charta:flipped": false
+        }
+      },
+      "texture": "myavalon:role/loyalist",
+      "translation": "card.myavalon.loyalist"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "myavalon:evil",
+          "charta:rank": "myavalon:assassin",
+          "charta:flipped": false
+        }
+      },
+      "texture": "myavalon:role/assassin",
+      "translation": "card.myavalon.assassin"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "myavalon:evil",
+          "charta:rank": "myavalon:morgana",
+          "charta:flipped": false
+        }
+      },
+      "texture": "myavalon:role/morgana",
+      "translation": "card.myavalon.morgana"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "myavalon:evil",
+          "charta:rank": "myavalon:mordred",
+          "charta:flipped": false
+        }
+      },
+      "texture": "myavalon:role/mordred",
+      "translation": "card.myavalon.mordred"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "myavalon:evil",
+          "charta:rank": "myavalon:oberon",
+          "charta:flipped": false
+        }
+      },
+      "texture": "myavalon:role/oberon",
+      "translation": "card.myavalon.oberon"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "myavalon:evil",
+          "charta:rank": "myavalon:minion",
+          "charta:flipped": false
+        }
+      },
+      "texture": "myavalon:role/minion",
+      "translation": "card.myavalon.minion"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "myavalon:vote",
+          "charta:rank": "myavalon:yes",
+          "charta:flipped": false
+        }
+      },
+      "texture": "myavalon:vote_yes",
+      "translation": "card.myavalon.vote_yes"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "myavalon:vote",
+          "charta:rank": "myavalon:no",
+          "charta:flipped": false
+        }
+      },
+      "texture": "myavalon:vote_no",
+      "translation": "card.myavalon.vote_no"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "myavalon:quest",
+          "charta:rank": "myavalon:success",
+          "charta:flipped": false
+        }
+      },
+      "texture": "myavalon:quest_success",
+      "translation": "card.myavalon.quest_success"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "myavalon:quest",
+          "charta:rank": "myavalon:fail",
+          "charta:flipped": false
+        }
+      },
+      "texture": "myavalon:quest_fail",
+      "translation": "card.myavalon.quest_fail"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "myavalon:token",
+          "charta:rank": "myavalon:crown",
+          "charta:flipped": false
+        }
+      },
+      "texture": "myavalon:token/crown",
+      "translation": "card.myavalon.crown"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "myavalon:token",
+          "charta:rank": "myavalon:iron_nugget",
+          "charta:flipped": false
+        }
+      },
+      "texture": "myavalon:token/iron_nugget",
+      "translation": "card.myavalon.iron_nugget"
+    }
+  ]
+}

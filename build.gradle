@@ -66,6 +66,9 @@ loom {
             ideConfigGenerated(true)
             runDir('runs/client')
             programArgs('--quickPlaySingleplayer', 'New')
+            // Windowed size for the dev client. Matches the author's real 1080p setup minus the window
+            // decorations, so a frame built here lines up with a screenshot taken there.
+            programArgs('--width', '1920', '--height', '1040')
         }
         server {
             server()

@@ -1,0 +1,37 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.myavalon.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "CardImageScale",
+    "CardTableDimensions",
+    "CardTableDirtySlots",
+    "MenuDataSlotBounds",
+    "CardSlotGeometry",
+    "SuitImageScale"
+  ],
+  "client": [
+    "AbstractCardWidgetComment",
+    "GameButtonConfig",
+    "TableScreenFields",
+    "CardPictureDim",
+    "CardImageFilters",
+    "CardSlotWidgetColumnStep",
+    "DeckScreenSuitIcons",
+    "FullColorCards",
+    "IrisCompatPresent",
+    "MouseHandlerAccessor",
+    "CardSlotWidgetHoverCost",
+    "CardSlotWidgetMetrics",
+    "RenderTargetViewport",
+    "GameScreenChatFrame",
+    "GameScreenFrameTick",
+    "GameScreenHoverCost",
+    "GameScreenMetrics"
+  ],
+  "injectors": {
+    "defaultRequire": 0,
+    "defaultExpect": 0
+  }
+}
