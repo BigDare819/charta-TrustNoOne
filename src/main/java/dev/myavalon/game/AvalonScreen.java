@@ -2,6 +2,7 @@ package dev.myavalon.game;
 
 import dev.myavalon.client.AvalonFrame;
 import dev.myavalon.client.AvalonLayout;
+import dev.myavalon.client.CardArt;
 import dev.myavalon.client.GuiTextureFilters;
 import dev.myavalon.client.TableDim;
 import dev.myavalon.client.UiBlend;
@@ -40,6 +41,7 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.util.Mth;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.item.DyeColor;
@@ -142,6 +144,22 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
     private static final ResourceLocation TEAM_FLAG = gui("team_flag");
     private static final ResourceLocation NUGGET = gui("mission_marker");
 
+    // ---- the optional modules' own art ----------------------------------------------------------
+
+    /** The Royal Sword, on its holder's plate. */
+    private static final ResourceLocation EXCALIBUR = gui("excalibur");
+    private static final int EXCALIBUR_SRC = 325;
+    /** The Lady of the Lake's angel, in the two languages the pack drew it in. */
+    private static final ResourceLocation LADY = gui("lady_of_the_lake");
+    private static final ResourceLocation LADY_EN = gui("lady_of_the_lake_en_us");
+    private static final int LADY_SRC_W = 495;
+    private static final int LADY_SRC_H = 694;
+    /** The loyalty card: blue for good, red for evil. */
+    private static final ResourceLocation LOYALTY_GOOD = gui("loyalty_good");
+    private static final ResourceLocation LOYALTY_EVIL = gui("loyalty_evil");
+    private static final int LOYALTY_SRC_W = 325;
+    private static final int LOYALTY_SRC_H = 455;
+
     /** The pack's 325x325 team marker, drawn at a square 13x13 design footprint. */
     private static final int FLAG_W = 13;
     private static final int FLAG_H = 13;
@@ -220,6 +238,22 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
     private double dragY;
 
     /**
+     * Whether the drafting sword is in hand. It works exactly like a carried flag — one click lifts it
+     * off the bar, the next sets it down on a player's avatar — but it is a tool rather than a marker:
+     * it never changes what the table sees, only what the leader is holding, and every drop sends it
+     * back to the bar.
+     */
+    private boolean carryingSword;
+
+    /**
+     * Wall clock of the moment each seat's flag went up, {@code 0} while it is down. The selection
+     * glow fades in from this timestamp, so a seat picked in the middle of a breath still rises from
+     * dark instead of popping; edges are noticed in {@link #updateSelectionGlow}, before anything draws.
+     */
+    private long[] pickedAt = new long[0];
+
+
+    /**
      * The team the local leader is building, as the local seat last left it, or {@code -1} when the
      * server's own copy is the truth.
      *
@@ -239,12 +273,51 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
     private int localPending = -1;
 
     /**
+     * The seat the local Angel has marked for inspection, or {@code -1}. Clicking an eligible seat marks
+     * it (and clicking it again unmarks), and the middle Confirm button starts the inspection. Kept
+     * through the reveal so the marked seat keeps its yellow strip while the card plays.
+     */
+    private int ladyPick = -1;
+
+    /**
      * The quest the local leader last clicked, for the same reason {@link #localPending} exists: the
      * server's answer is a round trip away, and a highlight that arrives a frame late reads as a missed
      * click. Cleared the moment the mirror agrees, or when the proposal ends.
      */
     private int localQuest = -1;
     private long localQuestAt;
+
+    /** Plot card / drawn card the local player has clicked and is now aiming at a seat. */
+    private int armedPlot = -1;
+    private int armedGive = -1;
+
+    /** The last loyalty reveal this screen has seen, and when it arrived; drives the private toast. */
+    private int lastRevealStamp = -1;
+    private long revealAtMs = -1L;
+
+    // ---- the Angel's reveal card ---------------------------------------------------------------
+
+    /**
+     * The Angel inspection's public card: it flies out of the examined seat to the middle of the screen,
+     * face down for everyone; only the holder's own mirror carries the answer, and only their client
+     * turns it over.
+     *
+     * <p>Keyed on the public {@code ladyUses} counter rather than the private reveal stamp, because every
+     * client has to see the card fly — the answer is the secret, not the act. {@code angelCardStamp}
+     * remembers the reveal this flight belongs to, so the old private toast stays retired for it without
+     * swallowing a plot-card reveal that happens to land in the same window.
+     */
+    private long angelCardStartMs = -1L;
+    private int angelCardFromRing = -1;
+    private int angelCardTarget = -1;
+    private int angelCardStamp;
+    private long angelSeenUses = -1L;
+
+    /** The hand-over animation: the token flying from the old holder's seat to the new one's. */
+    private int angelHolderShown = -1;
+    private long angelFlyStartMs = -1L;
+    private int angelFlyFromRing = -1;
+    private int angelFlyToRing = -1;
 
     // ---- the flag under the pointer -------------------------------------------------------------
 
@@ -609,6 +682,9 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
         // The frost is a post chain and therefore reads the framebuffer, so this frame's batched work has
         // to be landed before it runs -- see {@link #wash}.
         guiGraphics.flush();
+        // The Angel's reveal card, laid down in window pixels: the batch is landed and the frame pose is
+        // popped, which is exactly what its self-composited halo needs. See {@link #renderAngelReveal}.
+        renderAngelReveal(guiGraphics, partialTick);
         renderIdentityBlur(partialTick);
         renderIdentityReveal(guiGraphics, partialTick);
         // The closing act, on the same terms: over the whole frame, in window coordinates. It can never
@@ -694,27 +770,6 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
     /** Frost strength past which the curtain's own blur stands in for the world's. */
     private static final float ID_BLUR_HANDS_OVER_AT = 0.5f;
 
-    // ------------------------------------------------------------------ harness readouts ---
-    // Two plain getters for the dev harness's log line (see MyAvalonDebug). They are read once per
-    // client tick and exist only so the harness does not have to reach into Charta's types.
-
-    /** Whether Charta currently has a card under the cursor. */
-    public boolean getHoverablePeek() {
-        return this.hoverable != null;
-    }
-
-    /** Where the hovered card is, in frame coordinates. */
-    public String getHoveredProbe() {
-        if (this.hoverable == null) {
-            return "none";
-        }
-        if (this.hoverable instanceof net.minecraft.client.gui.components.AbstractWidget widget) {
-            return widget.getClass().getSimpleName() + "@" + widget.getX() + "," + widget.getY()
-                    + "+" + widget.getWidth() + "x" + widget.getHeight();
-        }
-        return this.hoverable.getClass().getSimpleName();
-    }
-
     /**
      * Turns last frame's mirrored state into this frame's animation: a leader change launches the crown
      * across the table and a rejection change launches the nugget along the board's counter.
@@ -726,11 +781,71 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
     private void updateAnimations() {
         if (menu.getPhase() != AvalonGame.Phase.PROPOSE) {
             carryingFlag = false;
+            carryingSword = false;
+            localQuest = -1;
+            localSwordOverride = false;
+            localSwordSeat = -1;
+        } else if (localSwordOverride && menu.getSwordHolder() == localSwordSeat) {
+            localSwordOverride = false;
+            localSwordSeat = -1;
+        }
+        if (menu.getPhase() != AvalonGame.Phase.LADY) {
+            ladyPick = -1;
+        }
+        if (menu.getPhase() != AvalonGame.Phase.SWING) {
+            swordPreviewStartMs = -1L;
+            swordPreviewDecided = false;
+            swordPreviewReplace = false;
+            swordPreviewSent = false;
+            swordPreviewIndex = -1;
+            swordPreviewOwner = -1;
+            swordPreviewOriginal = null;
+            swordPreviewFinal = null;
+        }
+        // The pick timestamps have to be current before anything draws, and the top bar -- which owns
+        // the glow's layer under its chips -- runs before renderBg. This is the one point ahead of both.
+        updateSelectionGlow();
+        updateAngelCard();
+        updateAngelHandover();
+        flushSwordDecision();
+        dev.myavalon.client.CardTracker.update(menu);
+        // A plot-card takeover hands the lead to somebody else while the phase is still PROPOSE; the
+        // deposed leader's optimistic selection must not outlive their turn, or their screen keeps a
+        // team the server has already cleared.
+        if (menu.getLeaderSeat() != menu.getLocalSeat()) {
+            localPending = -1;
             localQuest = -1;
         }
         // Every read of the team goes through pendingMask(), so asking it here is what retires the local
         // override the frame the server agrees -- see localPending.
         pendingMask();
+        // A plot card armed for a target only makes sense inside its own window; a phase change retires it
+        // so a leftover selection cannot fire on the next round's first seat click.
+        if (menu.getPhase() != AvalonGame.Phase.PLOTS) {
+            armedGive = -1;
+        }
+        if (menu.getPhase() != AvalonGame.Phase.PROPOSE && menu.getPhase() != AvalonGame.Phase.QUEST
+                && menu.getPhase() != AvalonGame.Phase.VETO && menu.getPhase() != AvalonGame.Phase.PLOTS) {
+            armedPlot = -1;
+        }
+        // A card that left the hand (used, stolen, or the whole batch already placed) must not stay
+        // armed: the next seat click would otherwise be spent on an action the server has to refuse.
+        if (armedPlot >= 0 && (menu.getPlotHand() & (1 << armedPlot)) == 0) {
+            armedPlot = -1;
+        }
+        if (armedGive >= 0) {
+            boolean stillDrawn = false;
+            for (int index = 0; index < AvalonGame.MAX_PLOT_DRAW; index++) {
+                AvalonPlot drawn = menu.getDrawnPlot(index);
+                if (drawn != null && drawn.ordinal() == armedGive) {
+                    stillDrawn = true;
+                    break;
+                }
+            }
+            if (!stillDrawn) {
+                armedGive = -1;
+            }
+        }
         // First sight of a match (or a fresh screen on an old match) takes the current crown and rejection
         // counter as the baseline. Without that, a screen reopened with two rejections already on the
         // board animated the nugget in from off the board, and a rematch replayed the previous game's
@@ -766,6 +881,15 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
             nuggetFlightStart = Util.getMillis();
             nuggetFlying = true;
             lastRejects = rejects;
+        }
+
+        // A loyalty reveal is a one-shot private fact; the toast's clock starts the frame the stamp
+        // moves. A screen reopened mid-game starts its own clock on its first mirrored value, which is
+        // harmless: the reveal it replays is the one that seat was last shown.
+        int stamp = menu.getRevealStamp();
+        if (stamp != lastRevealStamp) {
+            lastRevealStamp = stamp;
+            revealAtMs = Util.getMillis();
         }
     }
 
@@ -1125,12 +1249,57 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
             // The public setup, under the private card: which identities are on this table at all. One
             // line, every role in its faction colour, scaled to fit rather than clipped on a short window.
             Component census = censusLine();
+            int censusY = lineY;
             if (census != null) {
-                int censusY = lineY + Math.round((known != null ? 27f : 14f) * textScale);
+                censusY = lineY + Math.round((known != null ? 27f : 14f) * textScale);
                 drawRevealLine(guiGraphics, census, censusY, fittedScale(census, s * 1.1f, windowW),
                         textAlpha, ID_KNOWN_LABEL);
             }
+            // ...and under that, the optional rules this table was set up with: the one thing about the
+            // table a player cannot read off the board, and the act is the only moment the whole
+            // table is looking at the same screen at once.
+            Component rules = rulesLine();
+            if (rules != null) {
+                int rulesY = censusY + Math.max(14, Math.round(13f * textScale));
+                drawRevealLine(guiGraphics, rules, rulesY, fittedScale(rules, s * 1.0f, windowW),
+                        textAlpha, ID_RULES_LABEL);
+            }
         }
+    }
+
+    /** The dim label colour the optional-rule line is drawn in. */
+    private static final int ID_RULES_LABEL = 0xFF8FA6C8;
+
+    /** Every optional rule this deal was set up with, or {@code null} when none is on. */
+    @Nullable
+    private Component rulesLine() {
+        MutableComponent list = Component.empty();
+        boolean first = true;
+        String[] keys = {
+                "rule.myavalon.lady_of_the_lake",
+                "rule.myavalon.excalibur",
+                "rule.myavalon.lancelot",
+                "rule.myavalon.plot_cards",
+                "rule.myavalon.designated_quests",
+        };
+        boolean[] on = {
+                menu.isLadyOfTheLake(),
+                menu.isExcalibur(),
+                menu.isLancelot(),
+                menu.isPlotCards(),
+                menu.isDesignatedQuests(),
+        };
+        for (int i = 0; i < keys.length; i++) {
+            if (!on[i]) {
+                continue;
+            }
+            if (!first) {
+                list.append(Component.translatable("reveal.myavalon.census_sep"));
+            }
+            first = false;
+            list.append(Component.translatable(keys[i]));
+        }
+        return first ? null : Component.translatable("reveal.myavalon.rules_in_play", list);
     }
 
     /**
@@ -1144,14 +1313,14 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
      */
     @Nullable
     private Component censusLine() {
-        int census = menu.getRoleCensus();
+        long census = menu.getRoleCensus();
         if (census == 0) {
             return null;
         }
         MutableComponent list = Component.empty();
         boolean first = true;
         for (AvalonRole role : AvalonRole.values()) {
-            int count = (census >>> (role.ordinal() * 4)) & 0xF;
+            int count = (int) ((census >>> (role.ordinal() * 4)) & 0xFL);
             if (count <= 0) {
                 continue;
             }
@@ -1181,6 +1350,10 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
             return null;
         }
         boolean pair = role == AvalonRole.PERCIVAL;
+        // A wolf's list is a mix: the counterpart, and for the evil wolf the rest of evil as well. A label
+        // that called all of it "evil" would be wrong about the counterpart, so it says what happened
+        // instead of what the names mean.
+        boolean wolf = role == AvalonRole.LANCELOT_GOOD || role == AvalonRole.LANCELOT_EVIL;
         MutableComponent names = Component.empty();
         boolean first = true;
         for (int r = 0; r < ring.length; r++) {
@@ -1197,15 +1370,17 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
             }
             first = false;
             names.append(player.getName().copy()
-                    .withStyle(style -> style.withColor(pair ? ACTIVE : ID_EVIL_TEXT)));
+                    .withStyle(style -> style.withColor(pair || wolf ? ACTIVE : ID_EVIL_TEXT)));
         }
         // The label names what this seat can actually see, not "you know". Merlin is shown the evil side, so
         // his line says as much; Percival is shown a role, so his names it. A pair of keys rather than one
         // template, because the two are saying genuinely different things.
+        String key = pair ? "reveal.myavalon.known_pair"
+                : wolf ? "reveal.myavalon.known_wolf"
+                : "reveal.myavalon.known_evil";
         return names.getString().isEmpty()
                 ? null
-                : Component.translatable(pair ? "reveal.myavalon.known_pair" : "reveal.myavalon.known_evil",
-                        names);
+                : Component.translatable(key, names);
     }
 
     /** One centred line of the act: the component's own per-name styles win over this default. */
@@ -1378,7 +1553,14 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
             summaryStartMs = -1L;
             summaryLines = null;
         }
-        if (menu.getPhase() != AvalonGame.Phase.OVER || closingActUp()) {
+        if (menu.getPhase() != AvalonGame.Phase.OVER) {
+            return;
+        }
+        if (closingActUp()) {
+            // The act owns the screen; the report's own fade must not run underneath it and land at full
+            // strength the moment the act's fade-out ends. Restarting the clock here means the report
+            // always fades in *after* the ending animation, not during it.
+            summaryStartMs = -1L;
             return;
         }
         if (summaryStartMs < 0L) {
@@ -1772,6 +1954,11 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
             }
         }
 
+        // The picked seats' glow goes here, over the band and under the chips: the light is behind the
+        // avatar, the name and the hand row rather than washing over them, and the colour strip stays
+        // the topmost thing on the chip because it is drawn later, with the plates.
+        renderSelectionGlow(guiGraphics, chips);
+
         for (int i = 0; i < others; i++) {
             int seat = ring[i + 1];
             CardPlayer player = menu.getGame().playerAt(seat);
@@ -1820,8 +2007,14 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
      * attention in one rhythm instead of three.
      */
     private static int markedPulseAlpha() {
-        return (int) (0x66 + 0x94 * breath());
+        // Half the table's usual rhythm and a real trough: the wash goes out completely at the bottom of
+        // the breath instead of bottoming out at a permanent dim tint, which is what "it never gets faint
+        // enough" was. The chips themselves (head, name, hand) are not part of the fade.
+        return (int) (0xFA * breath(MARKED_BREATH_MS));
     }
+
+    /** The picked/on-turn chip wash's own pace: twice the table breath's period, i.e. half the speed. */
+    private static final double MARKED_BREATH_MS = 254.0;
 
     /** One shared 0..1 breath, so everything that pulses on this screen pulses together. */
     private static double breath() {
@@ -1911,6 +2104,17 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
         // On top of the tracker, which is itself painted over the board's own notches.
         renderRejectNugget(guiGraphics);
         renderStatus(guiGraphics);
+        renderPlotStrip(guiGraphics);
+        renderPlotDistribution(guiGraphics);
+        renderLadyTokens(guiGraphics);
+        renderAngelHandover(guiGraphics);
+        renderSwordToken(guiGraphics);
+        // The carried sword is drawn after the Angel's card on purpose: when it is in hand it must cover
+        // what it passes over, the Angel included.
+        renderDraftSword(guiGraphics);
+        scheduleQuestOwnerTooltip();
+        renderSpotlight(guiGraphics);
+        renderRevealToast(guiGraphics);
         if (editing) {
             renderEditor(guiGraphics);
         }
@@ -2109,10 +2313,12 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
             if (isChosen) {
                 chosenFill.add(box);
                 addBorder(chosenEdge, box, 2);
-            } else if (picking && isOpen) {
+            } else if (picking && chosen < 0 && isOpen) {
+                // Only while nothing is chosen: after the leader names one, the other frames stop
+                // advertising themselves and the chosen box is the only lit thing on the board.
                 openFill.add(box);
                 addBorder(openEdge, box, 1);
-            } else if (picking) {
+            } else if (picking && chosen < 0) {
                 lockedFill.add(box);
                 addBorder(lockedEdge, box, 1);
             }
@@ -2255,7 +2461,7 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
      */
     private ResourceLocation taskCardTexture() {
         String language = minecraft == null ? "zh_cn" : minecraft.getLanguageManager().getSelected();
-        boolean chinese = language.startsWith("zh");
+        boolean chinese = CardArt.isChineseLike(language);
         int seats = menu.getGame().getPlayers().size();
         if (taskCardResolved != null && seats == taskCardSeats && chinese == taskCardChinese) {
             return taskCardResolved;
@@ -2416,6 +2622,7 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
             dealTargetsFor = dealStartMs;
             dealTargets = handTargets(count);
         }
+        soundDealLandings(elapsed, count);
         float[][] targets = dealTargets;
         int identityEnd = AvalonGame.DEAL_SETTLE + count * AvalonGame.DEAL_STEP;
 
@@ -2444,6 +2651,44 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
     @Nullable
     private float[][] dealTargets;
     private long dealTargetsFor = Long.MIN_VALUE;
+
+    /** The deal's draw sounds: one per card that lands, in the same order the server deals. */
+    private long dealSoundFor = Long.MIN_VALUE;
+    private int dealSounded = -1;
+
+    /**
+     * Plays one card-draw sound for each landing the clock has passed. The server used to do this, one
+     * sound per seat, but a bot has no player to hear it from -- so every bot seat's cards were dealt in
+     * silence. Here every landed card sounds, whoever holds it, and the rhythm matches the animation.
+     */
+    private void soundDealLandings(float elapsed, int count) {
+        if (dealSoundFor != dealStartMs) {
+            dealSoundFor = dealStartMs;
+            dealSounded = -1;
+        }
+        int sequence = 0;
+        int due = -1;
+        int identityEnd = AvalonGame.DEAL_SETTLE + count * AvalonGame.DEAL_STEP;
+        for (int seat = 0; seat < count; seat++) {
+            int land = AvalonGame.DEAL_SETTLE + seat * AvalonGame.DEAL_STEP;
+            if (elapsed >= land) {
+                due = sequence;
+            }
+            sequence++;
+        }
+        int featureStart = identityEnd + AvalonGame.DEAL_PAUSE;
+        for (int index = 0; index < count * 4; index++) {
+            int land = featureStart + (index + 1) * AvalonGame.DEAL_FEATURE_STEP;
+            if (elapsed >= land) {
+                due = sequence;
+            }
+            sequence++;
+        }
+        if (due > dealSounded) {
+            dealSounded = due;
+            cardSound(ModSounds.CARD_DRAW);
+        }
+    }
 
     /**
      * Draws a dealt card that has not landed yet: parked in the middle stack, or in flight to its seat.
@@ -2602,11 +2847,14 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
         }
 
         int count = cards.size();
+        // The sword's window is still the same quest row: the cards have to stay face down until the reveal,
+        // so SWING draws with the quest layout rather than as a normal played-card row.
+        boolean questRow = phase == AvalonGame.Phase.QUEST || phase == AvalonGame.Phase.SWING;
         // A quest row is spread wider than a vote row. Both are capped by the pile's width, but a quest has
         // at most five cards in it and those five are what the whole table is about to read: at the vote's
         // pitch they overlap by a third and the leftmost numeral of each is all that shows. The reveal ends
         // by returning every card to this row, so this is the pitch they are read at.
-        int maxStep = phase == AvalonGame.Phase.QUEST ? PILE_CARD_W + PILE_QUEST_GAP : PILE_MAX_STEP;
+        int maxStep = questRow ? PILE_CARD_W + PILE_QUEST_GAP : PILE_MAX_STEP;
         int step = count <= 1 ? 0 : Math.min(maxStep, (box[2] - PILE_CARD_W) / (count - 1));
         int rowWidth = PILE_CARD_W + step * (count - 1);
         int left = box[0] + (box[2] - rowWidth) / 2;
@@ -2616,7 +2864,7 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
         long reveal = revealStartMs < 0L ? -1L : Util.getMillis() - revealStartMs;
         for (int i = 0; i < count; i++) {
             int[] slot = new int[]{left + i * step, top, PILE_CARD_W, PILE_CARD_H};
-            if (phase == AvalonGame.Phase.QUEST) {
+            if (questRow) {
                 // A quest card is played face-down and only turns over in the reveal, so nobody reads the
                 // table left-to-right as the cards land.
                 drawQuestCard(guiGraphics, cards.get(i), deck, slot, i, count, box, step, reveal);
@@ -2689,6 +2937,12 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
      */
     private void drawQuestCard(GuiGraphics guiGraphics, Card card, Deck deck, int[] slot,
                                int index, int count, int[] pile, int step, long reveal) {
+        if (swordPreviewStartMs >= 0L && index == swordPreviewIndex
+                && menu.getPhase() == AvalonGame.Phase.SWING
+                && menu.getSwordHolder() == menu.getLocalSeat()) {
+            drawSwordPreview(guiGraphics, deck, slot);
+            return;
+        }
         float rowY = slot[1] + slot[3] / 2f;
         float cx = slot[0] + slot[2] / 2f;
         float cy = rowY;
@@ -2744,7 +2998,94 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
 
         ResourceLocation texture = faceUp ? deck.getCardTexture(card, false) : deck.getTexture(false);
         ResourceLocation glow = faceUp ? deck.getCardTexture(card, true) : deck.getTexture(true);
+        // A card in the act is not hoverable; a card resting in the row is, like every other card.
+        float[] hover = reveal >= 0L ? NO_FLAG_TILT : cardHover(slot);
+        blitChartaCard(guiGraphics, texture, glow, cx, cy, slot[2], slot[3], spin, 0f,
+                hover[0], hover[1], hover[2]);
+    }
+
+    /**
+     * The sword holder's private look at one played card.
+     *
+     * <p>The table sees nothing: this is only drawn on the holder's client, from the two faces captured
+     * when they clicked. The card turns over to its original face, holds, fades out, the face it turns
+     * into fades in, holds, and turns back down -- then the server's own window expires and the normal
+     * shuffle starts with the card in its new state.
+     */
+    private void drawSwordPreview(GuiGraphics guiGraphics, Deck deck, int[] slot) {
+        long age = Util.getMillis() - swordPreviewStartMs;
+        float cx = slot[0] + slot[2] / 2f;
+        float cy = slot[1] + slot[3] / 2f;
+        float spin = 0f;
+        float alpha = 1f;
+        Card face = null;
+        if (swordPreviewDecided) {
+            long since = Util.getMillis() - swordPreviewDecidedAt;
+            long t = since;
+            if (swordPreviewReplace) {
+                // Replace: the face it becomes fades in over the original, then the card turns back down.
+                if (t < PREVIEW_SWAP_MS) {
+                    face = swordPreviewFinal;
+                    alpha = smooth(t / (float) PREVIEW_SWAP_MS);
+                } else if ((t -= PREVIEW_SWAP_MS) < PREVIEW_REPLACE_MS) {
+                    face = swordPreviewFinal;
+                } else if ((t -= PREVIEW_REPLACE_MS) < PREVIEW_OUT_MS) {
+                    face = swordPreviewFinal;
+                    spin = -90f * smooth(t / (float) PREVIEW_OUT_MS);
+                } else if ((t -= PREVIEW_OUT_MS) < PREVIEW_TURN_MS) {
+                    spin = 90f * (1f - smooth(t / (float) PREVIEW_TURN_MS));
+                }
+            } else {
+                // Keep: no replacement, the original simply turns back down.
+                if (t < PREVIEW_OUT_MS) {
+                    face = swordPreviewOriginal;
+                    spin = -90f * smooth(t / (float) PREVIEW_OUT_MS);
+                } else if ((t -= PREVIEW_OUT_MS) < PREVIEW_TURN_MS) {
+                    spin = 90f * (1f - smooth(t / (float) PREVIEW_TURN_MS));
+                }
+            }
+        } else {
+            long t = age;
+            if (t < PREVIEW_BACK_MS) {
+                spin = -90f * smooth(t / (float) PREVIEW_BACK_MS);
+            } else if ((t -= PREVIEW_BACK_MS) < PREVIEW_FACE_MS) {
+                face = swordPreviewOriginal;
+                spin = 90f * (1f - smooth(t / (float) PREVIEW_FACE_MS));
+            } else {
+                // The look: only the card's own face, held until the holder decides.
+                face = swordPreviewOriginal;
+            }
+        }
+        ResourceLocation texture = face == null ? deck.getTexture(false) : deck.getCardTexture(face, false);
+        ResourceLocation glow = face == null ? deck.getTexture(true) : deck.getCardTexture(face, true);
+        if (alpha < 1f) {
+            RenderSystem.setShaderColor(1f, 1f, 1f, alpha);
+        }
         blitChartaCard(guiGraphics, texture, glow, cx, cy, slot[2], slot[3], spin, 0f);
+        if (alpha < 1f) {
+            RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
+        }
+    }
+
+    /** The seat behind the pile card under the pointer: what "who played this" names. */
+    private void scheduleQuestOwnerTooltip() {
+        if (summaryOwnsScreen() || identityCurtainUp() || revealStartMs >= 0L) {
+            return;
+        }
+        AvalonGame.Phase phase = menu.getPhase();
+        if (phase != AvalonGame.Phase.QUEST && phase != AvalonGame.Phase.SWING) {
+            return;
+        }
+        int index = pileCardAt(scaledMouseX(), scaledMouseY());
+        if (index < 0) {
+            return;
+        }
+        int owner = menu.getQuestOrder(index);
+        if (owner < 0) {
+            return;
+        }
+        setTooltipForNextRenderPass(nameOf(owner).copy()
+                .withStyle(style -> style.withColor(ACTIVE)));
     }
 
     /**
@@ -2907,8 +3248,10 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
         ResourceLocation glow = card.flipped()
                 ? deck.getTexture(true)
                 : deck.getCardTexture(card, true);
+        float[] hover = cardHover(box);
         blitChartaCard(guiGraphics, texture, glow,
-                box[0] + box[2] / 2f, box[1] + box[3] / 2f, box[2], box[3], 0f, 0f);
+                box[0] + box[2] / 2f, box[1] + box[3] / 2f, box[2], box[3], 0f, 0f,
+                hover[0], hover[1], hover[2]);
     }
 
     /**
@@ -3024,13 +3367,26 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
         }
         platesMeasuredAt = frameStamp;
         int[] seats = menu.seats();
-        if (ring.length != seats.length) {
+        boolean ringChanged = ring.length != seats.length;
+        if (ringChanged) {
             ring = seats;
             plateTexts = new Component[seats.length];
             plateBoxes = new int[seats.length][];
             plateTextsKey = Integer.MIN_VALUE;
         } else {
+            for (int i = 0; i < seats.length; i++) {
+                if (ring[i] != seats[i]) {
+                    ringChanged = true;
+                    break;
+                }
+            }
             System.arraycopy(seats, 0, ring, 0, seats.length);
+        }
+        // The slot geometry is written at init and on an F9 edit; a seat ring that only appears (or
+        // rotates) once the game is running therefore used to leave every hand on its stale, often
+        // off-frame, slot. Re-publishing it the frame the ring changes is what keeps the fans visible.
+        if (ringChanged) {
+            applyLayout();
         }
         int key = menu.getKnownMask() * 31 + menu.getPhase().ordinal() * 7919 + menu.getLocalSeat();
         boolean textsStale = key != plateTextsKey;
@@ -3064,20 +3420,195 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
      *
      * <p>Another seat's "plate" is its whole bar chip, and the bar has already drawn the part of it that
      * says the table is doing something with that seat: the chip's background breathes at the seat's colour
-     * for a seat on turn, on the team or under the assassin's finger. What is left for this box is the one
-     * marking the pulse cannot carry — the assassin's pick, in red, so that "about to be stabbed" does not
-     * look like every other kind of attention.
+     * for a seat on turn, on the team or under the assassin's finger. What is left for this box is the two
+     * markings the pulse cannot carry — a picked seat, whose chip grows a top line in its own colour and a
+     * glow that fades in from dark and steps outward, ring by ring; and the assassin's pick, in red, so
+     * that "about to be stabbed" does not look like every other kind of attention.
      */
     private void drawPlate(GuiGraphics guiGraphics, int ringIndex, int seat) {
         if (ringIndex == 0) {
             return;
         }
+        int[] plate = plateBoxes[ringIndex];
         boolean chosen = menu.getPendingTarget() == seat && menu.getPhase() == AvalonGame.Phase.ASSASSIN;
-        if (!chosen) {
+        boolean picked = seat < pickedAt.length && pickedAt[seat] != 0L;
+        if (!chosen && !picked) {
             return;
         }
-        int[] plate = plateBoxes[ringIndex];
-        guiGraphics.fill(plate[0], plate[1], plate[0] + plate[2], plate[1] + 1, EVIL_COLOR);
+        if (picked) {
+            // The same top line the assassin's mark draws, always yellow: a picked player is named from
+            // across the table the way a player about to be stabbed is, and one colour for "on the team"
+            // keeps the strip legible with nine chips at once. The glow underneath is the seat's own,
+            // which is what still tells the seats apart.
+            guiGraphics.fill(plate[0], plate[1], plate[0] + plate[2], plate[1] + 1, PICKED_COLOR);
+        }
+        if (chosen) {
+            guiGraphics.fill(plate[0], plate[1], plate[0] + plate[2], plate[1] + 1, EVIL_COLOR);
+        }
+    }
+
+    /** The picked seats' top strip. One colour for every pick, as asked: {@code #FFFF00}. */
+    private static final int PICKED_COLOR = 0xFFFFFF00;
+
+    /**
+     * Notices the Angel changing hands and arms the token's flight. A hold-over that follows an
+     * inspection flies (the table just watched the card land in the middle); the opening assignment at
+     * the start of a game does not, because there is no old owner to leave.
+     */
+    private void updateAngelHandover() {
+        int holder = menu.getLadyHolder();
+        if (holder == angelHolderShown) {
+            return;
+        }
+        if (angelHolderShown >= 0 && holder >= 0 && menu.getLadyUses() > 0) {
+            angelFlyFromRing = ringIndexOf(angelHolderShown);
+            angelFlyToRing = ringIndexOf(holder);
+            angelFlyStartMs = Util.getMillis();
+        }
+        angelHolderShown = holder;
+    }
+
+    /** The Angel's token in flight between two seats; the static token appears when the flight lands. */
+    private void renderAngelHandover(GuiGraphics guiGraphics) {
+        if (angelFlyStartMs < 0L || angelFlyFromRing < 0 || angelFlyToRing < 0) {
+            return;
+        }
+        long age = Util.getMillis() - angelFlyStartMs;
+        if (age >= ANGEL_TOKEN_FLY_MS) {
+            angelFlyStartMs = -1L;
+            return;
+        }
+        float t = smooth(age / (float) ANGEL_TOKEN_FLY_MS);
+        int[] from = angelBox(angelFlyFromRing);
+        int[] to = angelBox(angelFlyToRing);
+        float cx = Mth.lerp(t, from[0] + from[2] / 2f, to[0] + to[2] / 2f);
+        float cy = Mth.lerp(t, from[1] + from[3] / 2f, to[1] + to[3] / 2f);
+        int artW = Math.max(1, Math.round(to[3] * (float) LADY_SRC_W / LADY_SRC_H));
+        if (artW > to[2]) {
+            artW = to[2];
+        }
+        blitCardTrueColor(guiGraphics, ladyArt(), cx, cy, artW, to[3], 0f, 0f, 0f);
+    }
+
+    /** Arms the Angel reveal card on the public use counter's rising edge; see the fields above. */
+    private void updateAngelCard() {
+        int uses = menu.getLadyUses();
+        if (angelSeenUses < 0L) {
+            angelSeenUses = uses;
+            return;
+        }
+        if (uses < angelSeenUses) {
+            // A new deal reset the counter: forget the old flight rather than replaying it.
+            angelSeenUses = uses;
+            angelCardStartMs = -1L;
+            return;
+        }
+        if (uses == angelSeenUses) {
+            return;
+        }
+        angelSeenUses = uses;
+        int target = menu.getLadyLastTarget();
+        if (target < 0 || menu.getPhase() == AvalonGame.Phase.OVER) {
+            return;
+        }
+        angelCardTarget = target;
+        angelCardFromRing = ringIndexOf(target);
+        angelCardStamp = menu.getRevealStamp();
+        angelCardStartMs = Util.getMillis();
+    }
+
+    /**
+     * The picked seats' glow: one ring per pixel stepping outward from the chip, drawn before the chips
+     * so the light sits <em>under</em> the avatar, the name, the hand row and the colour strip instead
+     * of washing over them. The alpha falls off by one notch per pixel, so the edge reads as a gradient
+     * rather than as four banded steps, and the whole glow breathes with the table's shared rhythm.
+     */
+    private void renderSelectionGlow(GuiGraphics guiGraphics, int[][] chips) {
+        int marked = menu.getPhase() == AvalonGame.Phase.ASSASSIN ? menu.getPendingTarget() : -1;
+        for (int i = 0; i < chips.length; i++) {
+            int seat = ring[i + 1];
+            if (seat < 0) {
+                continue;
+            }
+            int[] box = chips[i];
+            if (seat < pickedAt.length && pickedAt[seat] != 0L) {
+                int colour = 0xFF000000 | rgb(menu.getGame().playerAt(seat).getColor());
+                long age = Util.getMillis() - pickedAt[seat];
+                float fade = Mth.clamp(age / 600f, 0f, 1f);
+                int base = (int) (0x5A * fade * breath(MARKED_BREATH_MS));
+                glowRings(guiGraphics, box, base, colour);
+            }
+            // The knife's target pulses in red while it is being chosen: the same wide glow the picked
+            // seats wear, so the assassin's choice reads from across the table too.
+            if (seat == marked) {
+                int base = (int) (0x5A * breath(MARKED_BREATH_MS));
+                glowRings(guiGraphics, box, base, 0xFFE2716F);
+            }
+        }
+    }
+
+    /** One seat's outward glow: a ring per pixel, alpha falling off each step. */
+    private void glowRings(GuiGraphics guiGraphics, int[] box, int base, int colour) {
+        for (int pad = 1; pad <= GLOW_RADIUS; pad++) {
+            int alpha = base * (GLOW_RADIUS + 1 - pad) / GLOW_RADIUS;
+            if (alpha <= 0) {
+                continue;
+            }
+            guiGraphics.fill(box[0] - pad, box[1] - pad, box[0] + box[2] + pad, box[1] + box[3] + pad,
+                    (alpha << 24) | (colour & 0xFFFFFF));
+        }
+    }
+
+    /** How far a picked seat's glow reaches past its chip, in one-pixel rings. */
+    private static final int GLOW_RADIUS = 10;
+
+    /**
+     * Notices the rising and falling edges of the team mask, so {@link #drawPlate} can fade a seat's
+     * glow in from the moment it was picked rather than from the frame it was noticed.
+     */
+    /**
+     * What the picked-seat highlight is currently telling the table about.
+     *
+     * <p>In a proposal it is the team being drafted. In the Angel's window the team is history -- the
+     * server clears it when the window opens -- and the highlight moves to the seats the Angel may
+     * examine; once a seat is marked only that seat stays lit, and it keeps its strip through the reveal
+     * card's flight. Everywhere else it is the team mask again, which is what the flags read.
+     */
+    private int highlightMask() {
+        if (menu.getPhase() == AvalonGame.Phase.LADY) {
+            if (ladyPick >= 0) {
+                return 1 << ladyPick;
+            }
+            if (menu.isLadyTurn()) {
+                return menu.getLadyEligible();
+            }
+            // While the reveal card plays the table already knows who was examined; the strip stays on
+            // that seat so "who was looked at" reads at a glance, and the next window's stale target is
+            // excluded because the card is only up for its own window.
+            if (angelCardStartMs >= 0L && angelCardTarget >= 0) {
+                return 1 << angelCardTarget;
+            }
+            return 0;
+        }
+        return pendingMask();
+    }
+
+    private void updateSelectionGlow() {
+        int players = menu.getGame().getPlayers().size();
+        if (pickedAt.length != players) {
+            pickedAt = new long[players];
+        }
+        int mask = highlightMask();
+        long now = Util.getMillis();
+        for (int seat = 0; seat < players; seat++) {
+            if ((mask & (1 << seat)) != 0) {
+                if (pickedAt[seat] == 0L) {
+                    pickedAt[seat] = now;
+                }
+            } else {
+                pickedAt[seat] = 0L;
+            }
+        }
     }
 
     /** The name plus whatever {@code seat} is publicly known to be — the text a plate is sized from. */
@@ -3338,7 +3869,10 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
             int w = slot[2] + FLAG_SLOT_INFLATE * 2;
             int h = slot[3] + FLAG_SLOT_INFLATE * 2;
 
-            if (proposing) {
+            // The socket is an invitation to an empty seat only. A seat that already holds a flag is
+            // picked, and a hollow box drawn around its flag read as a heavy frame over a player who
+            // was already chosen -- exactly the "hollow box on the player bar" that had to go.
+            if (proposing && (pendingMask() & (1 << seat)) == 0) {
                 guiGraphics.fill(x, y, x + w, y + h, CELL_BG);
                 guiGraphics.fill(x, y, x + w, y + h, (pulseAlpha() << 24) | (colour & 0xFFFFFF));
                 frame(guiGraphics, x, y, w, h, colour);
@@ -3364,6 +3898,99 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
     /** The flag element for the {@code ringIndex}-th seat: the local one, or another seat's. */
     private static AvalonLayout.Element flagElement(int ringIndex) {
         return ringIndex == 0 ? AvalonLayout.Element.SELF_FLAG : AvalonLayout.Element.otherFlag(ringIndex - 1);
+    }
+
+    // ---------------------------------------------------------------- drafting sword ---
+
+    /** The drafting sword's F9-movable box on the proposal bar. */
+    private int[] swordBox() {
+        return LAYOUT.bounds(AvalonLayout.Element.SWORD_SELECT, width, height);
+    }
+
+    /** Whether the King's Sword is lying on a bearer rather than in the bar. */
+    private boolean swordPlaced() {
+        return menu.isExcalibur() && swordHolderNow() >= 0;
+    }
+
+    /**
+     * The bearer as the <em>screen</em> knows it: the local leader's last drop wins until the mirror
+     * agrees, exactly like {@code localPending} for the team. Without this the bar's sword is drawn for
+     * one frame after a drop -- the mirror still says "not placed" -- which reads as the card flashing
+     * back to its slot.
+     */
+    private int swordHolderNow() {
+        return localSwordOverride ? localSwordSeat : menu.getSwordHolder();
+    }
+
+    /** The local leader's optimistic bearer, and whether it is standing in for the mirror. */
+    private int localSwordSeat = -1;
+    private boolean localSwordOverride;
+
+    /** A bearer's sword badge box: the same 18px square at the Angel's position that is drawn. */
+    private int[] swordBadgeBox(int ringIndex) {
+        int[] anchor = angelBox(ringIndex);
+        float s = LAYOUT.scale(AvalonLayout.Element.angel(ringIndex));
+        float size = SWORD_BADGE_SIZE * s;
+        return new int[]{Math.round(anchor[0] + anchor[2] / 2f - size / 2f),
+                Math.round(anchor[1] + anchor[3] / 2f - size / 2f),
+                Math.round(size), Math.round(size)};
+    }
+
+    /**
+     * The proposal bar's drafting sword, and the leader carrying it.
+     *
+     * <p>It sits beside the spare flags as one more way to pick a seat — lift it, carry it, drop it on a
+     * player's avatar and that player is on the team. The flags stay what they were: the per-seat markers
+     * that say who is picked. The sword is the tool, so it draws only while a proposal is open, and every
+     * drop — on a seat or anywhere else — sends it back to the bar.
+     *
+     * <p>It is drawn the way the sword badge is: the pack's Excalibur art in a framed square. In the
+     * leader's hand it rides the pointer at the same size, so what was lifted is what lands.
+     */
+    private void renderDraftSword(GuiGraphics guiGraphics) {
+        if (identityFurnitureHidden() || !menu.isExcalibur()
+                || menu.getPhase() != AvalonGame.Phase.PROPOSE || !menu.isGameReadyAndRunning()) {
+            return;
+        }
+        if (carryingSword) {
+            int[] held = swordBox();
+            blitArt(guiGraphics, EXCALIBUR, (int) dragX - held[2] / 2, (int) dragY - held[3] / 2,
+                    held[2], held[3], EXCALIBUR_SRC, EXCALIBUR_SRC);
+            return;
+        }
+        if (swordPlaced()) {
+            // The sword lives on its bearer now; the bar is empty until the leader picks it back up.
+            return;
+        }
+        int[] box = swordBox();
+        // Just the card, through the card shader with the hover lift: no panel, no frame.
+        float[] hover = cardHover(box);
+        blitCardTrueColor(guiGraphics, EXCALIBUR,
+                box[0] + box[2] / 2f, box[1] + box[3] / 2f,
+                box[2], box[3], hover[0], hover[1], hover[2]);
+        scheduleSwordTooltip(box);
+    }
+
+    /** The sword's tooltip, while the pointer rests on it: a tool says what it is for. */
+    private void scheduleSwordTooltip(int[] box) {
+        if (summaryOwnsScreen() || identityCurtainUp()) {
+            return;
+        }
+        if (!inside(box, scaledMouseX(), scaledMouseY())) {
+            return;
+        }
+        boolean mine = menu.isLocalTurn();
+        Component tip = Component.translatable("status.myavalon.sword_line")
+                .withStyle(style -> style.withColor(SWORD_COLOR))
+                .copy()
+                .append(Component.literal("\n").withStyle(style -> style.withColor(DIM)))
+                .append(Component.translatable(mine
+                                ? "status.myavalon.sword_pick" : "status.myavalon.sword_pick_wait")
+                        .withStyle(style -> style.withColor(DIM)))
+                .append(Component.literal("\n").withStyle(style -> style.withColor(DIM)))
+                .append(Component.translatable("status.myavalon.sword_rule_hint")
+                        .withStyle(style -> style.withColor(DIM)));
+        setTooltipForNextRenderPass(tip);
     }
 
     // ------------------------------------------------------------------- flag hover ---
@@ -3393,7 +4020,9 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
         flagXRot = 0f;
         flagYRot = 0f;
 
-        if (menu.getPhase() != AvalonGame.Phase.PROPOSE || !menu.isGameReadyAndRunning() || carryingFlag) {
+        if (!menu.isGameReadyAndRunning() || carryingFlag || carryingSword
+                || menu.getPhase() == AvalonGame.Phase.DEALING
+                || menu.getPhase() == AvalonGame.Phase.OVER) {
             return;
         }
         double mouseX = scaledMouseX();
@@ -3465,14 +4094,16 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
         if (hoverFlagSeat < 0 && hoverFlagSpare < 0) {
             return;
         }
-        boolean mine = menu.isLocalTurn() && menu.isGameReadyAndRunning();
-        Component tip = Component.translatable("status.myavalon.flag_name")
-                .withStyle(style -> style.withColor(ACTIVE))
-                .copy()
-                .append(Component.literal("\n").withStyle(style -> style.withColor(DIM)))
-                .append(Component.translatable(mine
-                                ? "status.myavalon.flag_hint" : "status.myavalon.flag_hint_wait")
-                        .withStyle(style -> style.withColor(DIM)));
+        boolean mine = menu.isLocalTurn() && menu.isGameReadyAndRunning()
+                && menu.getPhase() == AvalonGame.Phase.PROPOSE;
+        MutableComponent tip = Component.translatable("status.myavalon.flag_name")
+                .withStyle(style -> style.withColor(ACTIVE));
+        if (menu.getPhase() == AvalonGame.Phase.PROPOSE) {
+            tip = tip.append(Component.literal("\n").withStyle(style -> style.withColor(DIM)))
+                    .append(Component.translatable(mine
+                                    ? "status.myavalon.flag_hint" : "status.myavalon.flag_hint_wait")
+                            .withStyle(style -> style.withColor(DIM)));
+        }
         setTooltipForNextRenderPass(tip);
     }
 
@@ -3583,7 +4214,10 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
     private boolean crownOnTable() {
         AvalonGame.Phase phase = menu.getPhase();
         return phase == AvalonGame.Phase.PROPOSE || phase == AvalonGame.Phase.VOTE
-                || phase == AvalonGame.Phase.QUEST || phase == AvalonGame.Phase.ASSASSIN;
+                || phase == AvalonGame.Phase.QUEST || phase == AvalonGame.Phase.ASSASSIN
+                || phase == AvalonGame.Phase.PLOTS || phase == AvalonGame.Phase.LADY
+                || phase == AvalonGame.Phase.VETO || phase == AvalonGame.Phase.SWORD
+                || phase == AvalonGame.Phase.SWING;
     }
 
     /**
@@ -3599,6 +4233,10 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
     private void renderCrown(GuiGraphics guiGraphics) {
         int leader = menu.getLeaderSeat();
         if (leader < 0) {
+            return;
+        }
+        // The table is done with leaders once the knife is out: the crown goes with the team markers.
+        if (menu.getPhase() == AvalonGame.Phase.ASSASSIN) {
             return;
         }
         long elapsed = Util.getMillis() - crownFlightStart;
@@ -3727,8 +4365,12 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
             return null;
         }
         boolean pair = viewer == AvalonRole.PERCIVAL;
-        return Component.translatable(pair ? "status.myavalon.known_pair" : "status.myavalon.known_evil")
-                .copy().withStyle(style -> style.withColor(pair ? ACTIVE : EVIL_COLOR));
+        boolean wolf = viewer == AvalonRole.LANCELOT_GOOD || viewer == AvalonRole.LANCELOT_EVIL;
+        String key = pair ? "status.myavalon.known_pair"
+                : wolf ? "status.myavalon.known_some"
+                : "status.myavalon.known_evil";
+        return Component.translatable(key)
+                .copy().withStyle(style -> style.withColor(pair || wolf ? ACTIVE : EVIL_COLOR));
     }
 
     // ------------------------------------------------------------------- status ---
@@ -3750,13 +4392,46 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
         // line followed it out -- it restated what the sockets, the pile's own caption and the confirm
         // button were already showing. The one thing the title row alone ever carried is who won, so it
         // stays for that and nothing else.
-        drawStatusLine(guiGraphics, phase == AvalonGame.Phase.OVER ? winnerLine() : Component.empty(),
+        drawStatusLine(guiGraphics, phase == AvalonGame.Phase.OVER ? winnerLine() : lancelotLine(),
                 AvalonLayout.Element.STATUS_TITLE, 0xFFFFFFFF);
 
         // Whose turn it is: their name, in their own colour, or "you".
         if (phase != AvalonGame.Phase.DEALING && phase != AvalonGame.Phase.OVER) {
             Component turn;
-            if (phase == AvalonGame.Phase.ASSASSIN) {
+            boolean acting = myTurn;
+            if (phase == AvalonGame.Phase.PLOTS) {
+                turn = Component.translatable(menu.isLocalTurn()
+                        ? "status.myavalon.plot_deal_you" : "status.myavalon.plot_deal_wait");
+            } else if (phase == AvalonGame.Phase.LADY) {
+                turn = menu.isLadyTurn()
+                        ? Component.translatable("status.myavalon.lady_you")
+                        : Component.translatable("status.myavalon.lady_wait", nameOf(menu.getLadyHolder()));
+            } else if (phase == AvalonGame.Phase.VETO) {
+                // The veto is nobody's turn in particular: it is open to every holder, and the line is
+                // lit for this viewer only when they actually hold the card.
+                acting = (menu.getUsablePlots() & (1 << AvalonPlot.NO_CONFIDENCE.ordinal())) != 0;
+                turn = Component.translatable(acting
+                        ? "status.myavalon.veto_you" : "status.myavalon.veto_wait");
+            } else if (phase == AvalonGame.Phase.SWORD) {
+                turn = Component.translatable(menu.isLocalTurn()
+                        ? "status.myavalon.sword_assign_you" : "status.myavalon.sword_assign_wait");
+            } else if (phase == AvalonGame.Phase.SWING) {
+                int aim = menu.getSwordAim();
+                if (menu.getSwordHolder() == menu.getLocalSeat()) {
+                    turn = Component.translatable("status.myavalon.sword_swing_you");
+                } else if (aim >= 0) {
+                    // The table can read the aim while the holder looks: gold and bold, the same pair of
+                    // names the tracker keeps.
+                    turn = Component.translatable("status.myavalon.sword_aim",
+                            nameOf(menu.getSwordHolder()).copy().withStyle(style ->
+                                    style.withColor(0xFFFFC75F).withBold(true)),
+                            nameOf(aim).copy().withStyle(style ->
+                                    style.withColor(0xFFFFFFFF).withBold(true)));
+                } else {
+                    turn = Component.translatable("status.myavalon.sword_swing_wait",
+                            nameOf(menu.getSwordHolder()));
+                }
+            } else if (phase == AvalonGame.Phase.ASSASSIN) {
                 // Not a turn at all: it is the one question the whole table is watching, so the line states
                 // the task and names both roles rather than naming a seat. Brighter for the assassin, who is
                 // the only person who can act on it.
@@ -3764,7 +4439,15 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
                         Component.translatable(AvalonRole.ASSASSIN.getTranslationKey()),
                         Component.translatable(AvalonRole.MERLIN.getTranslationKey()));
             } else if (myTurn) {
-                turn = Component.translatable("status.myavalon.your_turn");
+                // A finished team still owes the King's Sword under that rule: the line says what the
+                // last click before Confirm is, instead of the generic "your turn".
+                boolean swordOwed = phase == AvalonGame.Phase.PROPOSE && menu.isExcalibur()
+                        && localTeamSize() > 0
+                        && Integer.bitCount(pendingMask()) == localTeamSize()
+                        && (swordHolderNow() < 0
+                        || (pendingMask() & (1 << swordHolderNow())) == 0);
+                turn = Component.translatable(swordOwed
+                        ? "status.myavalon.sword_give_you" : "status.myavalon.your_turn");
             } else if (voting) {
                 // Nobody is being waited on in particular: the whole table answered at the same moment,
                 // so what this line can honestly say is that this seat's own vote is already in.
@@ -3777,17 +4460,77 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
             } else {
                 turn = Component.translatable("status.myavalon.waiting_for", nameOf(menu.getCurrentSeat()));
             }
+            final boolean highlight = acting;
             drawStatusLine(guiGraphics, turn.copy().withStyle(style -> style.withColor(
-                    myTurn ? ACTIVE : DIM)), AvalonLayout.Element.STATUS_TURN, 0xFFFFFFFF);
+                    highlight ? ACTIVE : DIM)), AvalonLayout.Element.STATUS_TURN, 0xFFFFFFFF);
         } else {
             drawStatusLine(guiGraphics, Component.empty(), AvalonLayout.Element.STATUS_TURN, 0xFFFFFFFF);
         }
 
         drawStatusLine(guiGraphics, tallyLine(), AvalonLayout.Element.STATUS_TALLY, 0xFFFFFFFF);
 
-        if (phase == AvalonGame.Phase.PROPOSE || phase == AvalonGame.Phase.ASSASSIN) {
+        if (phase == AvalonGame.Phase.PROPOSE || phase == AvalonGame.Phase.ASSASSIN
+                || phase == AvalonGame.Phase.LADY) {
             renderConfirmButton(guiGraphics);
         }
+        renderSwordSkipButton(guiGraphics);
+    }
+
+    /**
+     * The sword holder's buttons, stacked on the rows under the turn line and drawn exactly like the
+     * Confirm button.
+     *
+     * <p>Before a card is picked there is one button, Pass, which closes the window without replacing
+     * anything. Once a card is turned over the pair changes: the top button becomes Keep (back out of
+     * the look, nothing sent) and a Replace button appears under it to commit the replacement. After
+     * Replace both are gone -- the decision is made and the animation finishes on its own.
+     */
+    private void renderSwordSkipButton(GuiGraphics guiGraphics) {
+        if (menu.getPhase() != AvalonGame.Phase.SWING
+                || menu.getSwordHolder() != menu.getLocalSeat()
+                || !menu.isGameReadyAndRunning()) {
+            return;
+        }
+        if (swordPreviewDecided) {
+            return;
+        }
+        if (swordPreviewStartMs >= 0L) {
+            drawActionButton(guiGraphics, swordSkipBox(), true,
+                    Component.translatable("status.myavalon.sword_keep"));
+            drawActionButton(guiGraphics, swordReplaceBox(), true,
+                    Component.translatable("status.myavalon.sword_replace"));
+            return;
+        }
+        drawActionButton(guiGraphics, swordSkipBox(), true,
+                Component.translatable("status.myavalon.sword_skip"));
+    }
+
+    /** The Replace button's box: one more row under the Keep button, same size. */
+    private int[] swordReplaceBox() {
+        int[] skip = swordSkipBox();
+        return new int[]{skip[0], skip[1] + skip[3] + 4, skip[2], skip[3]};
+    }
+
+    /** The Pass button's box: the Confirm button's own size, under the status hint text. */
+    private int[] swordSkipBox() {
+        int[] tally = LAYOUT.bounds(AvalonLayout.Element.STATUS_TALLY, width, height);
+        int[] confirm = confirmBox();
+        // A full row under the last status line, so the buttons never sit on the text.
+        return new int[]{tally[0] + tally[2] / 2 - confirm[2] / 2, tally[1] + tally[3] + 14,
+                confirm[2], confirm[3]};
+    }
+
+    /**
+     * The one drawer both action buttons use: a dark plate, a lit frame when it can be pressed, and the
+     * label centred in it. Hover lifts its fill a step so it behaves like the corner buttons.
+     */
+    private void drawActionButton(GuiGraphics guiGraphics, int[] box, boolean enabled, Component label) {
+        boolean hoveredNow = enabled && inside(box, scaledMouseX(), scaledMouseY());
+        guiGraphics.fill(box[0], box[1], box[0] + box[2], box[1] + box[3],
+                enabled ? (hoveredNow ? CELL_HOVER : 0x88202010) : 0x30000000);
+        frame(guiGraphics, box[0], box[1], box[2], box[3], enabled ? ACTIVE : OUTLINE);
+        guiGraphics.drawString(font, label, box[0] + (box[2] - font.width(label)) / 2,
+                box[1] + (box[3] - 8) / 2, enabled ? ACTIVE : DIM, true);
     }
 
     /**
@@ -3819,6 +4562,12 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
 
     /** The team size against the votes already in, so "are we still deciding" is readable. */
     private Component tallyLine() {
+        if (armedPlot >= 0) {
+            return Component.translatable("status.myavalon.plot_choose_target");
+        }
+        if (armedGive >= 0 && menu.getPhase() == AvalonGame.Phase.PLOTS) {
+            return Component.translatable("status.myavalon.plot_choose_give");
+        }
         AvalonGame.Phase phase = menu.getPhase();
         if (phase == AvalonGame.Phase.VOTE) {
             int voted = Integer.bitCount(menu.getVotedMask());
@@ -3846,6 +4595,27 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
                     Integer.bitCount(pendingMask()), menu.getTeamSize(),
                     menu.getGame().requiredFails());
         }
+        if (phase == AvalonGame.Phase.PLOTS) {
+            if (!menu.isLocalTurn()) {
+                return Component.translatable("status.myavalon.plot_wait_line");
+            }
+            int left = 0;
+            for (int index = 0; index < AvalonGame.MAX_PLOT_DRAW; index++) {
+                if (menu.getDrawnPlot(index) != null) {
+                    left++;
+                }
+            }
+            return Component.translatable("status.myavalon.plot_left", left);
+        }
+        if (phase == AvalonGame.Phase.LADY) {
+            return Component.translatable("status.myavalon.lady_line", menu.getLadyUses() + 1);
+        }
+        if (phase == AvalonGame.Phase.VETO) {
+            return Component.translatable("status.myavalon.veto_line");
+        }
+        if (phase == AvalonGame.Phase.SWORD || phase == AvalonGame.Phase.SWING) {
+            return Component.translatable("status.myavalon.sword_line");
+        }
         return Component.empty();
     }
 
@@ -3859,28 +4629,41 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
         };
     }
 
+    /**
+     * The Lancelots' public state, in the row the winner banner uses while the game is still running.
+     *
+     * <p>Only the swap is public: the loyalty cards are turned face up, so everybody knows whether the
+     * wolves have changed sides, but nobody knows which two seats they are.
+     */
+    private Component lancelotLine() {
+        if (!menu.isLancelot()) {
+            return Component.empty();
+        }
+        return Component.translatable(menu.isLancelotSwapped()
+                        ? "status.myavalon.lancelot_swapped" : "status.myavalon.lancelot_steady")
+                .withStyle(style -> style.withColor(menu.isLancelotSwapped() ? EVIL_COLOR : DIM));
+    }
+
     private void renderConfirmButton(GuiGraphics guiGraphics) {
-        boolean propose = menu.getPhase() == AvalonGame.Phase.PROPOSE;
+        AvalonGame.Phase phase = menu.getPhase();
+        boolean propose = phase == AvalonGame.Phase.PROPOSE;
+        boolean lady = phase == AvalonGame.Phase.LADY;
         // In a proposal the button only surfaces once every flag is placed, so it reads as the reward for
         // finishing the team; in the assassination it is there from the start but stays disabled until a
         // target is picked. Under the designated rule it also waits for a quest: a team has no size until
-        // the leader names one.
+        // the leader names one. In the Angel's window it appears once the window is the holder's to use,
+        // grey until a seat is marked and bright after -- the same "reward for finishing" shape.
+        if (lady && !menu.isLadyTurn()) {
+            return;
+        }
         if (propose && (localTeamSize() <= 0 || Integer.bitCount(pendingMask()) != localTeamSize())) {
             return;
         }
+        boolean swordReady = !menu.isExcalibur() || swordHolderNow() >= 0;
         boolean enabled = menu.isLocalTurn() && menu.isGameReadyAndRunning()
-                && (propose || menu.getPendingTarget() >= 0);
-        int[] box = confirmBox();
-        double mouseX = scaledMouseX();
-        double mouseY = scaledMouseY();
-        boolean hoveredNow = enabled && inside(box, mouseX, mouseY);
-
-        guiGraphics.fill(box[0], box[1], box[0] + box[2], box[1] + box[3],
-                enabled ? (hoveredNow ? CELL_HOVER : 0x88202010) : 0x30000000);
-        frame(guiGraphics, box[0], box[1], box[2], box[3], enabled ? ACTIVE : OUTLINE);
-        Component label = Component.translatable("status.myavalon.confirm");
-        guiGraphics.drawString(font, label, box[0] + (box[2] - font.width(label)) / 2, box[1] + 4,
-                enabled ? ACTIVE : DIM, true);
+                && (lady ? ladyPick >= 0 : propose ? swordReady : menu.getPendingTarget() >= 0);
+        drawActionButton(guiGraphics, confirmBox(), enabled,
+                Component.translatable("status.myavalon.confirm"));
     }
 
     private int[] confirmBox() {
@@ -3890,6 +4673,738 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
     private static boolean inside(int[] box, double x, double y) {
         return x >= box[0] && x < box[0] + box[2] && y >= box[1] && y < box[1] + box[3];
     }
+
+    // ------------------------------------------------------------------- optional modules ---
+    //
+    // Plot cards, the Lady of the Lake and the loyalty reveal share one visual language: a plain
+    // bordered box with the card's own name, no texture yet. The art slots are deliberately empty --
+    // these boxes are the placeholders the final sprites will be drawn into, and the layout numbers
+    // are the ones the strip keeps whether it holds a box or a picture.
+
+    /** The local plot hand, a vertical strip down the free left edge under the book button. */
+    private static final int PLOT_X = 4;
+    private static final int PLOT_Y = 72;
+    private static final int PLOT_STEP = 23;
+    private static final int PLOT_W = 64;
+    private static final int PLOT_H = 20;
+    /** The leader's drawn cards during distribution, one row across the top. */
+    private static final int DRAW_Y = 34;
+    private static final int DRAW_W = 104;
+    private static final int DRAW_H = 22;
+    private static final int DRAW_GAP = 5;
+    /** How long a private loyalty reveal stays on screen. */
+    private static final long REVEAL_TOAST_MS = 6000;
+
+    /** Held plot cards in display order: the ordinals whose bit is set. */
+    private int[] plotHandSlots() {
+        int hand = menu.getPlotHand();
+        int[] slots = new int[Integer.bitCount(hand)];
+        int at = 0;
+        for (int ordinal = 0; ordinal < AvalonPlot.values().length; ordinal++) {
+            if ((hand & (1 << ordinal)) != 0) {
+                slots[at++] = ordinal;
+            }
+        }
+        return slots;
+    }
+
+    private int[] plotCardBox(int index) {
+        return new int[]{PLOT_X, PLOT_Y + index * PLOT_STEP, PLOT_W, PLOT_H};
+    }
+
+    /** Indices 0..2 whose drawn card has not been handed out yet, in display order. */
+    private int[] drawnPlotSlots() {
+        int[] slots = new int[AvalonGame.MAX_PLOT_DRAW];
+        int count = 0;
+        for (int index = 0; index < AvalonGame.MAX_PLOT_DRAW; index++) {
+            if (menu.getDrawnPlot(index) != null) {
+                slots[count++] = index;
+            }
+        }
+        return java.util.Arrays.copyOf(slots, count);
+    }
+
+    private int[] drawnPlotBox(int position, int count) {
+        int total = count * DRAW_W + Math.max(0, count - 1) * DRAW_GAP;
+        return new int[]{(width - total) / 2 + position * (DRAW_W + DRAW_GAP), DRAW_Y, DRAW_W, DRAW_H};
+    }
+
+    /** Ring index of {@code seat}, or {@code -1}. */
+    private int ringIndexOf(int seat) {
+        for (int r = 0; r < ring.length; r++) {
+            if (ring[r] == seat) {
+                return r;
+            }
+        }
+        return -1;
+    }
+
+    private void renderPlotStrip(GuiGraphics guiGraphics) {
+        AvalonGame.Phase phase = menu.getPhase();
+        if (phase == AvalonGame.Phase.DEALING || phase == AvalonGame.Phase.OVER) {
+            return;
+        }
+        int[] slots = plotHandSlots();
+        if (slots.length == 0) {
+            return;
+        }
+        Component header = Component.translatable("status.myavalon.plot_hand");
+        guiGraphics.drawString(font, header, PLOT_X, PLOT_Y - 10, 0xFFD8CCFF, true);
+        int usable = menu.getUsablePlots();
+        int hoveredOrdinal = -1;
+        double mouseX = scaledMouseX();
+        double mouseY = scaledMouseY();
+        for (int position = 0; position < slots.length; position++) {
+            int ordinal = slots[position];
+            AvalonPlot card = AvalonPlot.at(ordinal);
+            if (card == null) {
+                continue;
+            }
+            int[] box = plotCardBox(position);
+            boolean ready = (usable & (1 << ordinal)) != 0;
+            boolean armed = armedPlot == ordinal;
+            if (inside(box, mouseX, mouseY)) {
+                hoveredOrdinal = ordinal;
+            }
+            guiGraphics.fill(box[0], box[1], box[0] + box[2], box[1] + box[3],
+                    armed ? 0x88302800 : ready ? 0x88202010 : 0x60000000);
+            frame(guiGraphics, box[0], box[1], box[2], box[3], armed || ready ? ACTIVE : OUTLINE);
+            Component label = Component.translatable(card.getShortKey());
+            guiGraphics.drawString(font, label, box[0] + (box[2] - font.width(label)) / 2, box[1] + 6,
+                    ready ? ACTIVE : DIM, true);
+        }
+        if (hoveredOrdinal >= 0) {
+            drawPlotHint(guiGraphics, AvalonPlot.at(hoveredOrdinal), PLOT_X + PLOT_W + 8, PLOT_Y);
+        }
+    }
+
+    /** A hovered plot card's rule, next to wherever the card is drawn. */
+    private void drawPlotHint(GuiGraphics guiGraphics, AvalonPlot card, int x, int y) {
+        if (card == null) {
+            return;
+        }
+        Component title = Component.translatable(card.getTranslationKey());
+        List<FormattedCharSequence> lines = font.split(
+                Component.translatable(card.getHintKey()), 190);
+        int widthPx = 202;
+        int heightPx = 14 + 11 + lines.size() * 10;
+        x = Math.min(x, width - widthPx - 4);
+        y = Math.min(y, height - heightPx - 4);
+        guiGraphics.fill(x, y, x + widthPx, y + heightPx, 0xE0101018);
+        frame(guiGraphics, x, y, widthPx, heightPx, 0x80FFFFFF);
+        guiGraphics.drawString(font, title, x + 6, y + 6, ACTIVE, true);
+        int lineY = y + 20;
+        for (FormattedCharSequence line : lines) {
+            guiGraphics.drawString(font, line, x + 6, lineY, 0xFFD8D8D8, false);
+            lineY += 10;
+        }
+    }
+
+    private void renderPlotDistribution(GuiGraphics guiGraphics) {
+        if (menu.getPhase() != AvalonGame.Phase.PLOTS || !menu.isLocalTurn()) {
+            return;
+        }
+        int[] slots = drawnPlotSlots();
+        if (slots.length == 0) {
+            return;
+        }
+        // No caption here: y=20 is inside the top-bar chip row, and the status turn line already says
+        // what this row is for. The cards themselves are the affordance.
+        double mouseX = scaledMouseX();
+        double mouseY = scaledMouseY();
+        AvalonPlot hovered = null;
+        for (int position = 0; position < slots.length; position++) {
+            AvalonPlot card = menu.getDrawnPlot(slots[position]);
+            if (card == null) {
+                continue;
+            }
+            int[] box = drawnPlotBox(position, slots.length);
+            boolean armed = armedGive == card.ordinal();
+            if (inside(box, mouseX, mouseY)) {
+                hovered = card;
+            }
+            guiGraphics.fill(box[0], box[1], box[0] + box[2], box[1] + box[3],
+                    armed ? 0x88302800 : 0x88202010);
+            frame(guiGraphics, box[0], box[1], box[2], box[3], armed ? ACTIVE : OUTLINE);
+            Component label = Component.translatable(card.getShortKey());
+            guiGraphics.drawString(font, label, box[0] + (box[2] - font.width(label)) / 2, box[1] + 7,
+                    ACTIVE, true);
+        }
+        if (hovered != null) {
+            drawPlotHint(guiGraphics, hovered, (width - 202) / 2, DRAW_Y + DRAW_H + 6);
+        }
+    }
+
+    /**
+     * The Lady token on its holder: the pack's angel card itself, no panel behind it — the art is a card
+     * and the table already has enough frames. Across the table it rides the avatar at about the head's
+     * size; on the local seat it is a full card beside the hand, drawn at the size the fan's cards are.
+     * While the holder is choosing, the seats they may examine carry the token's own violet frame.
+     */
+    private void renderLadyTokens(GuiGraphics guiGraphics) {
+        int holder = menu.getLadyHolder();
+        if (holder < 0 || menu.getPhase() == AvalonGame.Phase.OVER
+                || menu.getPhase() == AvalonGame.Phase.DEALING) {
+            return;
+        }
+        // No hollow box around the seats the Angel may examine: the pick highlight (glow + yellow strip)
+        // already marks them, and a second outline on the chip read as a third state.
+        int ringIndex = ringIndexOf(holder);
+        if (ringIndex < 0 || plateBoxes.length <= ringIndex) {
+            return;
+        }
+        int[] box = angelBox(ringIndex);
+        if (menu.isLadyTurn()) {
+            // "It is your call" still has to read, now that the card carries no frame: a soft violet
+            // glow behind it does the same job without boxing the art in.
+            int glow = 0x40 + (int) (0x30 * breath());
+            for (int pad = 1; pad <= 6; pad++) {
+                guiGraphics.fill(box[0] - pad, box[1] - pad, box[0] + box[2] + pad, box[1] + box[3] + pad,
+                        (glow * (7 - pad) / 6 << 24) | 0xB9A6FF);
+            }
+        }
+        if (angelFlyStartMs >= 0L) {
+            // The hand-over animation is carrying the card right now; this seat's token appears when it
+            // lands, so the two never draw at once.
+            return;
+        }
+        // The angel is a portrait; it keeps its aspect and sits centred in the box, the box itself being
+        // the card's footprint (a hand card's, or the avatar's). Drawn through the card shader with the
+        // hover lift, so it answers the pointer like every other card on the table.
+        int artW = Math.max(1, Math.round(box[3] * (float) LADY_SRC_W / LADY_SRC_H));
+        if (artW > box[2]) {
+            artW = box[2];
+        }
+        float[] hover = cardHover(box);
+        blitCardTrueColor(guiGraphics, ladyArt(), box[0] + box[2] / 2f, box[1] + box[3] / 2f,
+                artW, box[3], hover[0], hover[1], hover[2]);
+        scheduleLadyTooltip(box);
+    }
+
+    /** The angel badge of the seat at {@code ringIndex}: the local one, or another seat's. */
+    private int[] angelBox(int ringIndex) {
+        return LAYOUT.bounds(AvalonLayout.Element.angel(ringIndex), width, height);
+    }
+
+    /**
+     * Charta's card hover for any hand-drawn card box: the pointer's position on the card becomes the
+     * same lift toward the camera and tilt toward the pointer an {@code AbstractCardWidget} feeds its
+     * shader. Everything the screen draws itself that is a card -- flags, tokens, the pile's row --
+     * goes through this so it answers the pointer like the hand's real widgets do.
+     */
+    /** Reused by {@link #cardHover}: the values are read immediately by the caller's blit. */
+    private final float[] hoverScratch = {-30f, 0f, 0f};
+
+    private float[] cardHover(int[] box) {
+        double mouseX = scaledMouseX();
+        double mouseY = scaledMouseY();
+        if (!inside(box, mouseX, mouseY)) {
+            return NO_FLAG_TILT;
+        }
+        float halfX = Math.max(1f, box[2] / 2f);
+        float halfY = Math.max(1f, box[3] / 2f);
+        float xDif = (float) ((box[0] + halfX - mouseX) / halfX);
+        float yDif = (float) ((box[1] + halfY - mouseY) / halfY);
+        hoverScratch[0] = -30f;
+        hoverScratch[1] = yDif * 25f;
+        hoverScratch[2] = xDif * -25f;
+        return hoverScratch;
+    }
+
+    /** The seat behind the index-th pile card, or {@code -1}; see AvalonMenu#getQuestOrder. */
+    private int questOrder(int index) {
+        return menu.getQuestOrder(index);
+    }
+
+    /** The Angel token's tooltip: a card says what it is when the pointer rests on it. */
+    private void scheduleLadyTooltip(int[] box) {
+        if (summaryOwnsScreen() || identityCurtainUp()) {
+            return;
+        }
+        if (!inside(box, scaledMouseX(), scaledMouseY())) {
+            return;
+        }
+        Component tip = Component.translatable("status.myavalon.lady_badge")
+                .withStyle(style -> style.withColor(0xFFB9A6FF))
+                .copy()
+                .append(Component.literal("\n").withStyle(style -> style.withColor(DIM)))
+                .append(Component.translatable("status.myavalon.lady_rule_hint")
+                        .withStyle(style -> style.withColor(DIM)));
+        setTooltipForNextRenderPass(tip);
+    }
+
+    /** The pile's cards as a list; the stack hands them out as an {@code Iterable}. */
+    private List<Card> pileCardList() {
+        List<Card> cards = new ArrayList<>();
+        for (Card card : menu.getPileCards().getCards()) {
+            cards.add(card);
+        }
+        return cards;
+    }
+
+    /** The pile card under the pointer, or {@code -1}. Topmost last, so a row's overlap picks the newer. */
+    private int pileCardAt(double mouseX, double mouseY) {
+        int[] pile = pileBox();
+        if (!inside(pile, mouseX, mouseY)) {
+            return -1; // outside the pile's strip: no card can be under the pointer
+        }
+        int count = 0;
+        for (Card ignored : menu.getPileCards().getCards()) {
+            count++;
+        }
+        if (count == 0) {
+            return -1;
+        }
+        AvalonGame.Phase phase = menu.getPhase();
+        boolean questRow = phase == AvalonGame.Phase.QUEST || phase == AvalonGame.Phase.SWING;
+        int maxStep = questRow ? PILE_CARD_W + PILE_QUEST_GAP : PILE_MAX_STEP;
+        int step = count <= 1 ? 0 : Math.min(maxStep, (pile[2] - PILE_CARD_W) / (count - 1));
+        int rowWidth = PILE_CARD_W + step * (count - 1);
+        int left = pile[0] + (pile[2] - rowWidth) / 2;
+        int top = pile[1] + (pile[3] - PILE_CARD_H) / 2;
+        for (int i = count - 1; i >= 0; i--) {
+            int x = left + i * step;
+            if (mouseX >= x && mouseX < x + PILE_CARD_W && mouseY >= top && mouseY < top + PILE_CARD_H) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    // ---- the sword holder's private card preview ----
+
+    /** The row index the holder clicked, and the two faces the local animation plays. */
+    private int swordPreviewIndex = -1;
+    private int swordPreviewOwner = -1;
+    private Card swordPreviewOriginal;
+    private Card swordPreviewFinal;
+    private long swordPreviewStartMs = -1L;
+    /** Set when the holder presses Replace/Keep: from then on the animation plays and then one action is sent. */
+    private boolean swordPreviewDecided;
+    private boolean swordPreviewReplace;
+    private long swordPreviewDecidedAt;
+    /** When the decision's animation ends and its single action goes out, and whether it already did. */
+    private long swordPreviewSendAt;
+    private boolean swordPreviewSent;
+
+    /**
+     * Arms the holder's local turn-over. The card at {@code index} is still the original at click time
+     * (the strike packet is what flips it on the server), and the opposite face is what it becomes; the
+     * animation is played from these two, so it never depends on a mirror that has already moved on.
+     */
+    private void armSwordPreview(int index, int owner) {
+        List<Card> cards = pileCardList();
+        if (index < 0 || index >= cards.size() || owner < 0) {
+            return;
+        }
+        Card original = cards.get(index);
+        if (original == null) {
+            return;
+        }
+        swordPreviewIndex = index;
+        swordPreviewOwner = owner;
+        swordPreviewOriginal = original;
+        swordPreviewFinal = AvalonCards.questCard(!AvalonCards.isSuccess(original));
+        swordPreviewStartMs = Util.getMillis();
+        swordPreviewDecided = false;
+        swordPreviewReplace = false;
+        swordPreviewDecidedAt = 0L;
+        swordPreviewSendAt = 0L;
+        swordPreviewSent = false;
+        // The table is told the sword is being pointed at this seat while the card is looked at; it is
+        // public on purpose -- the others read it in the turn line.
+        send(AvalonGame.SWORD_AIM_BASE + owner);
+    }
+
+    /** Backs out of the look at a card: nothing was ever sent, so the card is simply face down again. */
+    private void cancelSwordPreview() {
+        if (swordPreviewStartMs >= 0L && !swordPreviewDecided) {
+            send(AvalonGame.SWORD_AIM_CLEAR);
+        }
+        swordPreviewStartMs = -1L;
+        swordPreviewDecided = false;
+        swordPreviewReplace = false;
+        swordPreviewIndex = -1;
+        swordPreviewOwner = -1;
+        swordPreviewOriginal = null;
+        swordPreviewFinal = null;
+        swordPreviewSent = false;
+    }
+
+    /**
+     * Commits one of the two decisions. Nothing reaches the server yet: the card's own animation plays
+     * first -- Keep turns it face down again, Replace shows the face it becomes and then turns it down --
+     * and the action (pass or strike) goes out when that animation ends, so the shuffle always starts
+     * after it has been watched.
+     */
+    private void confirmSwordPreview(boolean replace) {
+        if (swordPreviewOwner < 0 || swordPreviewDecided) {
+            return;
+        }
+        swordPreviewDecided = true;
+        swordPreviewReplace = replace;
+        swordPreviewDecidedAt = Util.getMillis();
+        // A little air after the animation's last frame: the action must never overtake it.
+        swordPreviewSendAt = swordPreviewDecidedAt + decisionDuration(replace) + 160L;
+        swordPreviewSent = false;
+    }
+
+    /** How long the decision's animation runs before its action is sent. */
+    private static long decisionDuration(boolean replace) {
+        return replace
+                ? PREVIEW_REPLACE_MS + PREVIEW_OUT_MS + PREVIEW_TURN_MS
+                : PREVIEW_OUT_MS + PREVIEW_TURN_MS;
+    }
+
+    /** Sends the one action a decision owns, once, when its animation has finished. */
+    private void flushSwordDecision() {
+        if (!swordPreviewDecided || !swordPreviewSent && swordPreviewOwner < 0) {
+            return;
+        }
+        if (!swordPreviewSent && Util.getMillis() >= swordPreviewSendAt) {
+            swordPreviewSent = true;
+            send(swordPreviewReplace
+                    ? AvalonGame.SWORD_STRIKE_BASE + swordPreviewOwner
+                    : AvalonGame.SWORD_PASS);
+            return;
+        }
+        // The action was sent but the window is still open and nothing has changed on the server (it
+        // refused the strike). Let the holder look again rather than leaving them with no buttons.
+        if (swordPreviewSent && menu.getPhase() == AvalonGame.Phase.SWING
+                && Util.getMillis() - swordPreviewSendAt > 1500L
+                && menu.getSwordFlipTarget() < 0) {
+            swordPreviewDecided = false;
+            swordPreviewSent = false;
+            swordPreviewStartMs = -1L;
+            swordPreviewIndex = -1;
+            swordPreviewOwner = -1;
+            swordPreviewOriginal = null;
+            swordPreviewFinal = null;
+        }
+    }
+
+    /** The Lady's angel in the language the player is reading. */
+    private ResourceLocation ladyArt() {
+        boolean chinese = minecraft == null
+                || CardArt.isChineseLike(minecraft.getLanguageManager().getSelected());
+        return chinese ? LADY : LADY_EN;
+    }
+
+    /** A whole texture, scaled into a box; the source's own dimensions are passed so nothing stretches. */
+    private void blitArt(GuiGraphics guiGraphics, ResourceLocation texture, int x, int y, int w, int h,
+                         int sourceW, int sourceH) {
+        UiBlend.on();
+        guiGraphics.blit(texture, x, y, w, h, 0f, 0f, sourceW, sourceH, sourceW, sourceH);
+    }
+
+    /** The Royal Sword's colour, for its tooltip title. */
+    private static final int SWORD_COLOR = 0xFFFFC75F;
+    /** The sword badge's box on another seat's avatar: smaller than the crown's 22 so the angel peeks out. */
+    private static final float SWORD_BADGE_SIZE = 18f;
+
+    private void renderSwordToken(GuiGraphics guiGraphics) {
+        AvalonGame.Phase phase = menu.getPhase();
+        if (!menu.isExcalibur() || phase == AvalonGame.Phase.DEALING
+                || phase == AvalonGame.Phase.OVER) {
+            return;
+        }
+        int holder = swordHolderNow();
+        if (holder < 0) {
+            return;
+        }
+        int ringIndex = ringIndexOf(holder);
+        if (ringIndex < 0 || plateBoxes.length <= ringIndex) {
+            return;
+        }
+        // Across the table the sword rides the holder's avatar, drawn after the angel so it covers it --
+        // the pair share one F9 position by design (the Angel's), and the sword is the newer news. It is
+        // a crown-sized card, no panel behind it.
+        if (ringIndex == 0) {
+            int[] token = LAYOUT.bounds(AvalonLayout.Element.SELF_SWORD, width, height);
+            float[] hover = cardHover(token);
+            blitCardTrueColor(guiGraphics, EXCALIBUR,
+                    token[0] + token[2] / 2f, token[1] + token[3] / 2f,
+                    token[2], token[3], hover[0], hover[1], hover[2]);
+            scheduleSwordTokenTooltip(token);
+            return;
+        }
+        int[] anchor = angelBox(ringIndex);
+        float s = LAYOUT.scale(AvalonLayout.Element.angel(ringIndex));
+        // A step under the crown box so the Angel's card shows a sliver above and below it: the sword is
+        // the newer news, not a lid over the older one.
+        float size = SWORD_BADGE_SIZE * s;
+        int[] box = swordBadgeBox(ringIndex);
+        float[] hover = cardHover(box);
+        blitCardTrueColor(guiGraphics, EXCALIBUR,
+                anchor[0] + anchor[2] / 2f, anchor[1] + anchor[3] / 2f,
+                size, size, hover[0], hover[1], hover[2]);
+        scheduleSwordTokenTooltip(box);
+    }
+
+    /** The King's Sword badge's tooltip: a card says what it is. */
+    private void scheduleSwordTokenTooltip(int[] box) {
+        if (summaryOwnsScreen() || identityCurtainUp()) {
+            return;
+        }
+        if (!inside(box, scaledMouseX(), scaledMouseY())) {
+            return;
+        }
+        Component tip = Component.translatable("status.myavalon.sword_line")
+                .withStyle(style -> style.withColor(SWORD_COLOR))
+                .copy()
+                .append(Component.literal("\n").withStyle(style -> style.withColor(DIM)))
+                .append(Component.translatable("status.myavalon.sword_rule_hint")
+                        .withStyle(style -> style.withColor(DIM)));
+        setTooltipForNextRenderPass(tip);
+    }
+
+    /**
+     * The sword's clicks: the leader gives it away, the holder turns a card over or passes.
+     *
+     * <p>Passing is clicking the blade on your own plate or the plate itself. Both are the same
+     * statement -- "I am not using it" -- and both are bigger targets than a timeout would be.
+     */
+    private boolean handleSwordClick(double mouseX, double mouseY) {
+        AvalonGame.Phase phase = menu.getPhase();
+        if (!menu.isGameReadyAndRunning()) {
+            return false;
+        }
+        if (phase == AvalonGame.Phase.SWING) {
+            if (menu.getSwordHolder() != menu.getLocalSeat()) {
+                return false;
+            }
+            if (swordPreviewDecided) {
+                return true; // already replaced; the card's animation is finishing on its own
+            }
+            if (swordPreviewStartMs >= 0L) {
+                // A card is open on the table: the buttons are Keep (turn it back, no replacement) and
+                // Replace (show what it becomes, then turn it back).
+                if (inside(swordSkipBox(), mouseX, mouseY)) {
+                    confirmSwordPreview(false);
+                    return true;
+                }
+                if (inside(swordReplaceBox(), mouseX, mouseY)) {
+                    confirmSwordPreview(true);
+                    return true;
+                }
+            } else if (inside(swordSkipBox(), mouseX, mouseY)) {
+                send(AvalonGame.SWORD_PASS);
+                return true;
+            }
+            // The card is the target: one click turns it over for the holder alone. Nothing is sent
+            // until Replace, so the table sees no change while the card is being looked at.
+            int card = pileCardAt(mouseX, mouseY);
+            if (card >= 0) {
+                int owner = questOrder(card);
+                if (owner >= 0 && (menu.getSwordEligible() & (1 << owner)) == 0) {
+                    return false;
+                }
+                if (owner >= 0) {
+                    // Re-clicking a card -- the same one or another -- always restarts the look, so the
+                    // turn-over is watchable as many times as the holder wants before deciding.
+                    armSwordPreview(card, owner);
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The seat forced to play its quest card in the open. */
+    private void renderSpotlight(GuiGraphics guiGraphics) {        int seat = menu.getSpotlightSeat();
+        if (seat < 0 || menu.getPhase() != AvalonGame.Phase.QUEST) {
+            return;
+        }
+        int ringIndex = ringIndexOf(seat);
+        if (ringIndex < 0 || plateBoxes.length <= ringIndex) {
+            return;
+        }
+        int[] plate = plateBoxes[ringIndex];
+        frame(guiGraphics, plate[0] - 1, plate[1] - 1, plate[2] + 2, plate[3] + 2, ACTIVE);
+        Component tag = Component.translatable("status.myavalon.spotlight");
+        // Top-bar chips sit at y=0, where a label above them would be clipped off the frame.
+        int tagY = plate[1] < 12 ? plate[1] + plate[3] + 1 : plate[1] - 10;
+        guiGraphics.drawString(font, tag, plate[0], tagY, ACTIVE, true);
+    }
+
+    /**
+     * The private loyalty reveal: a toast that only the seat it was shown to ever sees.
+     *
+     * <p>Its subject and faction come down the same per-viewer mirror as everything else secret; the
+     * loyalty-card variant is the placeholder the final blue and red sprites go into.
+     */
+    // ---- the Angel's reveal card ---------------------------------------------------------------
+
+    /** Flight, face-down hold, the holder's turn-over, and how long the card then stays up. */
+    private static final long ANGEL_FLY_MS = 460L;
+    private static final long ANGEL_HOLD_MS = 340L;
+    private static final long ANGEL_FLIP_MS = 320L;
+    private static final long ANGEL_CARD_MS = 5600L;
+    /** Card size in design pixels: a normal card, the same 44x62 the pack draws everywhere else. */
+    private static final int ANGEL_CARD_W = 44;
+    private static final int ANGEL_CARD_H = 62;
+
+    /** The sword holder's local turn-over: turn to the original, hold, swap, turn back down. */
+    private static final long PREVIEW_BACK_MS = 200L;
+    private static final long PREVIEW_FACE_MS = 200L;
+    private static final long PREVIEW_HOLD_MS = 440L;
+    private static final long PREVIEW_FADE_MS = 240L;
+    private static final long PREVIEW_SWAP_MS = 240L;
+    /** How long the replacement's own face is held before the card is turned back down. */
+    private static final long PREVIEW_REPLACE_MS = 200L;
+    private static final long PREVIEW_SHOW_MS = 260L;
+    private static final long PREVIEW_OUT_MS = 200L;
+    private static final long PREVIEW_TURN_MS = 200L;
+
+    /** How long the Angel card takes to fly from the old holder's seat to the new one. */
+    private static final long ANGEL_TOKEN_FLY_MS = 650L;
+
+    /**
+     * The Angel inspection's reveal: a real card that flies from the examined seat to the middle of the
+     * screen — the deck's own back for everyone, and, only on the holder's client, the loyalty card
+     * turned over with a flip once it has landed.
+     *
+     * <p>Drawn outside the frame pose and after the batch has been flushed, because it goes through
+     * {@link #blitIdentityCard}: that renders the card and composites its halo itself, in window pixels,
+     * which is only valid once the frame pose is popped and nothing is pending in the batch. It is the
+     * same road the identity curtain's card takes, and for the same reasons.
+     *
+     * <p>While the front is up the card answers the pointer with what it is — the subject, the side and
+     * the reminder that only this seat can see it. The back stays mute: nothing about the answer is
+     * allowed to leak, not even a tooltip.
+     */
+    private void renderAngelReveal(GuiGraphics guiGraphics, float partialTick) {
+        if (angelCardStartMs < 0L) {
+            return;
+        }
+        long age = Util.getMillis() - angelCardStartMs;
+        if (age > ANGEL_CARD_MS) {
+            angelCardStartMs = -1L;
+            return;
+        }
+        if (angelCardTarget < 0 || angelCardTarget >= menu.getGame().getPlayers().size()) {
+            angelCardStartMs = -1L;
+            return;
+        }
+        AvalonFrame frame = AvalonFrame.current();
+        float s = frame.scale();
+        int windowW = AvalonFrame.windowWidth();
+        int windowH = AvalonFrame.windowHeight();
+        int cardW = Math.round(ANGEL_CARD_W * s);
+        int cardH = Math.round(ANGEL_CARD_H * s);
+
+        // From the examined seat's hand to the middle of the window.
+        int[] from = angelCardFromRing <= 0
+                ? LAYOUT.bounds(AvalonLayout.Element.SELF_HAND, width, height)
+                : LAYOUT.bounds(AvalonLayout.Element.otherHand(angelCardFromRing - 1), width, height);
+        float fromX = frame.originX() + (from[0] + from[2] / 2f) * s;
+        float fromY = frame.originY() + (from[1] + from[3] / 2f) * s;
+        float t = Mth.clamp(age / (float) ANGEL_FLY_MS, 0f, 1f);
+        t = t * t * (3f - 2f * t);
+        float cx = Mth.lerp(t, fromX, windowW / 2f);
+        float cy = Mth.lerp(t, fromY, windowH / 2f);
+
+        // Only the holder's mirror has the answer, and only for this subject: everyone else watches a
+        // back the whole time.
+        boolean holdsAnswer = menu.getRevealSeat() == angelCardTarget && menu.getRevealFaction() != 0;
+        boolean front = false;
+        float spin = 0f;
+        if (holdsAnswer && age > ANGEL_FLY_MS + ANGEL_HOLD_MS) {
+            long f = age - ANGEL_FLY_MS - ANGEL_HOLD_MS;
+            if (f < ANGEL_FLIP_MS / 2) {
+                // First half: the back turns to edge-on.
+                spin = -90f * (f / (ANGEL_FLIP_MS / 2f));
+            } else if (f < ANGEL_FLIP_MS) {
+                // Second half: the face comes round from edge-on, the two halves reading as one turn.
+                front = true;
+                spin = 90f * (1f - (f - ANGEL_FLIP_MS / 2f) / (ANGEL_FLIP_MS / 2f));
+            } else {
+                front = true;
+            }
+        }
+
+        // Fade out at the end; the card is opaque for the whole flight and most of the hold.
+        float alpha = 1f;
+        long fadeFrom = ANGEL_CARD_MS - 500L;
+        if (age > fadeFrom) {
+            alpha = Mth.clamp((ANGEL_CARD_MS - age) / 500f, 0f, 1f);
+        }
+        if (alpha <= 0f) {
+            return;
+        }
+
+        boolean evil = menu.getRevealFaction() == AvalonGame.SIDE_EVIL;
+        Deck deck = getDeck();
+        ResourceLocation texture = front ? (evil ? LOYALTY_EVIL : LOYALTY_GOOD) : deck.getTexture(false);
+        ResourceLocation glow = deck.getTexture(true);
+        blitIdentityCard(guiGraphics, partialTick, texture, glow, cx, cy, cardW, cardH,
+                0f, 0f, spin, alpha);
+
+        if (front && age > ANGEL_FLY_MS + ANGEL_HOLD_MS + ANGEL_FLIP_MS
+                && mouseOver(cx, cy, cardW, cardH)) {
+            Component tip = Component.translatable("status.myavalon.reveal_title", nameOf(angelCardTarget))
+                    .withStyle(style -> style.withColor(evil ? EVIL_COLOR : 0xFF6FA8FF))
+                    .copy()
+                    .append(Component.literal("\n").withStyle(style -> style.withColor(DIM)))
+                    .append(Component.translatable(evil ? "faction.myavalon.evil" : "faction.myavalon.good")
+                            .withStyle(style -> style.withColor(evil ? EVIL_COLOR : 0xFF6FA8FF)))
+                    .append(Component.literal("\n").withStyle(style -> style.withColor(DIM)))
+                    .append(Component.translatable("status.myavalon.reveal_hint")
+                            .withStyle(style -> style.withColor(DIM)));
+            setTooltipForNextRenderPass(tip);
+        }
+    }
+
+    private void renderRevealToast(GuiGraphics guiGraphics) {
+        if (revealAtMs < 0 || menu.getRevealSeat() < 0 || menu.getPhase() == AvalonGame.Phase.OVER) {
+            return;
+        }
+        // The Angel's inspection is shown by the flying card instead; this toast would be a second copy
+        // of the same answer on top of it. The whole Angel window suppresses it — the card is the
+        // reveal, and no plot reveal can happen while the window is open.
+        if (menu.getPhase() == AvalonGame.Phase.LADY) {
+            return;
+        }
+        if (angelCardStartMs >= 0L && menu.getRevealStamp() == angelCardStamp) {
+            return;
+        }
+        long age = Util.getMillis() - revealAtMs;
+        if (age > REVEAL_TOAST_MS) {
+            return;
+        }
+        int subject = menu.getRevealSeat();
+        boolean evil = menu.getRevealFaction() == AvalonGame.SIDE_EVIL;
+        int tint = evil ? EVIL_COLOR : 0xFF6FA8FF;
+        int cardW = 44;
+        int cardH = 62;
+        int widthPx = 236;
+        int heightPx = 92;
+        int x = (width - widthPx) / 2;
+        int y = 40;
+        guiGraphics.fill(x, y, x + widthPx, y + heightPx, 0xE0101018);
+        frame(guiGraphics, x, y, widthPx, heightPx, tint);
+
+        Component title = menu.isLoyaltyCards()
+                ? Component.translatable("status.myavalon.reveal_title", nameOf(subject))
+                : Component.translatable("status.myavalon.reveal_plain", nameOf(subject),
+                Component.translatable(evil ? "faction.myavalon.evil" : "faction.myavalon.good"));
+        guiGraphics.drawString(font, title, x + 10, y + 12, tint, true);
+
+        if (menu.isLoyaltyCards()) {
+            int cardX = x + 10;
+            int cardY = y + 26;
+            guiGraphics.fill(cardX, cardY, cardX + cardW, cardY + cardH, 0xFF101010);
+            blitArt(guiGraphics, evil ? LOYALTY_EVIL : LOYALTY_GOOD, cardX, cardY, cardW, cardH,
+                    LOYALTY_SRC_W, LOYALTY_SRC_H);
+            frame(guiGraphics, cardX, cardY, cardW, cardH, tint);
+            Component hint = Component.translatable("status.myavalon.reveal_hint");
+            guiGraphics.drawString(font, hint, x + cardW + 22, y + 44, DIM, true);
+        } else {
+            Component hint = Component.translatable("status.myavalon.reveal_hint");
+            guiGraphics.drawString(font, hint, x + 10, y + 44, DIM, true);
+        }
+    }
+
 
     // ------------------------------------------------------------------- editor ---
 
@@ -3936,9 +5451,12 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
         list.add(AvalonLayout.Element.PILE);
         // After the pile so its handle wins the hit-test in the strip they share.
         list.add(AvalonLayout.Element.CONFIRM);
+        list.add(AvalonLayout.Element.SWORD_SELECT);
         list.add(AvalonLayout.Element.SELF_HAND);
         list.add(AvalonLayout.Element.SELF_PLATE);
         list.add(AvalonLayout.Element.SELF_FLAG);
+        list.add(AvalonLayout.Element.SELF_ANGEL);
+        list.add(AvalonLayout.Element.SELF_SWORD);
         list.add(AvalonLayout.Element.SELF_CROWN);
         int others = Math.max(0, ring.length - 1);
         for (int i = 0; i < others; i++) {
@@ -3948,6 +5466,7 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
             list.add(AvalonLayout.Element.otherHand(i));
             list.add(AvalonLayout.Element.otherFlag(i));
             list.add(AvalonLayout.Element.otherCrown(i));
+            list.add(AvalonLayout.Element.otherAngel(i));
         }
         // STATUS_TITLE is still here because the end-of-game banner is drawn in it; the rejects row is
         // gone from the table, so it is gone from the editor too.
@@ -4001,7 +5520,7 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
         double frameMouseY = frameY(mouseY);
         lastMouseX = frameMouseX;
         lastMouseY = frameMouseY;
-        if (carryingFlag) {
+        if (carryingFlag || carryingSword) {
             dragX = frameMouseX;
             dragY = frameMouseY;
         }
@@ -4033,10 +5552,116 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
             // reading the rules mid-curtain is a reasonable thing to want.
             return true;
         }
+        if (button == 0 && handleSwordClick(frameMouseX, frameMouseY)) {
+            return true;
+        }
+        if (button == 0 && handlePlotClick(frameMouseX, frameMouseY)) {
+            return true;
+        }
         if (button == 0 && handleActionClick(frameMouseX, frameMouseY)) {
             return true;
         }
         return super.mouseClicked(frameMouseX, frameMouseY, button);
+    }
+
+    /**
+     * Handles the optional modules' clicks: the plot strip, the leader's distribution row, the Lady
+     * token and a pending plot target.
+     *
+     * <p>Called before {@link #handleActionClick} because the strip sits outside every card slot and
+     * because during a distribution the leader's seat clicks mean "give this card here" rather than
+     * "toggle this flag". It only consumes a click it actually acted on, so a card drag, a flag lift or
+     * a pile click still reaches the inherited handlers.
+     *
+     * @return {@code true} when the click was consumed
+     */
+    private boolean handlePlotClick(double mouseX, double mouseY) {
+        AvalonGame.Phase phase = menu.getPhase();
+        if (!menu.isGameReadyAndRunning()) {
+            armedPlot = -1;
+            armedGive = -1;
+            return false;
+        }
+
+        // The leader's hand-out row, above the table.
+        if (phase == AvalonGame.Phase.PLOTS && menu.isLocalTurn()) {
+            int[] slots = drawnPlotSlots();
+            for (int position = 0; position < slots.length; position++) {
+                AvalonPlot card = menu.getDrawnPlot(slots[position]);
+                if (card != null && inside(drawnPlotBox(position, slots.length), mouseX, mouseY)) {
+                    armedGive = armedGive == card.ordinal() ? -1 : card.ordinal();
+                    return true;
+                }
+            }
+            if (armedGive >= 0) {
+                int seat = seatAtPlate(mouseX, mouseY);
+                if (seat >= 0 && seat != menu.getLocalSeat()) {
+                    AvalonPlot card = AvalonPlot.at(armedGive);
+                    if (card != null) {
+                        send(AvalonGame.plotGiveAction(card, seat));
+                    }
+                    armedGive = -1;
+                    return true;
+                }
+                // A click anywhere else is a cancel, and then falls through to whatever it landed on.
+                armedGive = -1;
+            }
+        }
+
+        // The Angel: click an eligible seat to mark it, then press the middle Confirm to start the
+        // inspection. There is no skip -- the rule's point is that the holder must look, and the server
+        // rejects the old skip action.
+        if (phase == AvalonGame.Phase.LADY && menu.isLadyTurn()) {
+            if (inside(confirmBox(), mouseX, mouseY) && ladyPick >= 0) {
+                send(AvalonGame.ladyAction(ladyPick));
+                cardSound(ModSounds.CARD_PLAY);
+                return true;
+            }
+            int seat = seatAtPlate(mouseX, mouseY);
+            if (seat >= 0 && (menu.getLadyEligible() & (1 << seat)) != 0) {
+                ladyPick = ladyPick == seat ? -1 : seat;
+                cardSound(ModSounds.CARD_DRAW);
+                return true;
+            }
+            return true; // the LADY phase owns the table; a stray click must not reach a card slot
+        }
+
+        // The local plot hand, down the left edge.
+        int[] slots = plotHandSlots();
+        for (int position = 0; position < slots.length; position++) {
+            if (!inside(plotCardBox(position), mouseX, mouseY)) {
+                continue;
+            }
+            int ordinal = slots[position];
+            if ((menu.getUsablePlots() & (1 << ordinal)) == 0) {
+                return true;
+            }
+            AvalonPlot card = AvalonPlot.at(ordinal);
+            if (card == null) {
+                return true;
+            }
+            if (card.needsTarget()) {
+                armedPlot = armedPlot == ordinal ? -1 : ordinal;
+            } else {
+                send(AvalonGame.plotUseAction(card, -1));
+                armedPlot = -1;
+            }
+            return true;
+        }
+        if (armedPlot >= 0) {
+            int seat = seatAtPlate(mouseX, mouseY);
+            if (seat >= 0) {
+                AvalonPlot card = AvalonPlot.at(armedPlot);
+                if (card != null) {
+                    send(AvalonGame.plotUseAction(card, seat));
+                }
+                armedPlot = -1;
+                return true;
+            }
+            // Same cancel rule: an armed card that was clicked nowhere near a seat is put back down.
+            armedPlot = -1;
+        }
+        return false;
     }
 
     /**
@@ -4113,14 +5738,92 @@ public class AvalonScreen extends GameScreen<AvalonGame, AvalonMenu> {
             return true;
         }
 
+        if (carryingSword) {
+            // Second click: the sword goes back to the bar no matter where it lands -- it is the tool,
+            // not a marker.
+            //
+            // On a free seat it drafts that seat (when the team still has room). On a seat already on the
+            // team it gives that member the King's Sword when the rule is on -- the badge appears on
+            // their avatar, which is what "the sword went there" means -- and never knocks a picked seat
+            // back out: the flag staying put is the point, and a mispick is undone by clicking the flag.
+            // With the rule off the old drafting behaviour is kept and a picked seat is toggled off.
+            carryingSword = false;
+            int seat = seatAtPlate(mouseX, mouseY);
+            if (seat >= 0 && seat != menu.getLocalSeat()) {
+                boolean alreadyPicked = (pendingMask() & (1 << seat)) != 0;
+                boolean nowPicked = alreadyPicked;
+                if (!alreadyPicked && Integer.bitCount(pendingMask()) < localTeamSize()) {
+                    toggleFlag(seat);
+                    nowPicked = true;
+                    cardSound(ModSounds.CARD_PLAY);
+                }
+                if (nowPicked) {
+                    if (menu.isExcalibur()) {
+                        // The sword lands on the member: whether they were already picked or were just
+                        // picked by this drop, the badge goes on their avatar and the flags stay put.
+                        localSwordOverride = true;
+                        localSwordSeat = seat;
+                        send(AvalonGame.SWORD_ASSIGN_BASE + seat);
+                    } else if (alreadyPicked) {
+                        // No rule, so the tool keeps its drafting meaning: a second drop takes the seat
+                        // back out.
+                        toggleFlag(seat);
+                        cardSound(ModSounds.CARD_DRAW);
+                    }
+                }
+            }
+            return true;
+        }
+
         boolean questReady = !menu.isDesignatedQuests() || chosenQuest() >= 0;
         boolean full = Integer.bitCount(pendingMask()) == localTeamSize();
-        if (questReady && full && inside(confirmBox(), mouseX, mouseY)) {
+        boolean swordGiven = !menu.isExcalibur() || menu.getSwordHolder() >= 0;
+        if (questReady && full && swordGiven && inside(confirmBox(), mouseX, mouseY)) {
             send(AvalonGame.CONFIRM);
             return true;
         }
-        // A flag in a socket: the click pulls it back out into the hand, so a misdrop is undone by
-        // taking the flag rather than by toggling the seat out from under it.
+        // A placed sword is a card on the table: click it to take it back into the hand, so a bearer can
+        // be changed without hunting for the bar.
+        if (swordPlaced()) {
+            int holderRing = ringIndexOf(swordHolderNow());
+            if (holderRing > 0 && inside(swordBadgeBox(holderRing), mouseX, mouseY)) {
+                send(AvalonGame.SWORD_RETRIEVE);
+                localSwordOverride = true;
+                localSwordSeat = -1;
+                carryingSword = true;
+                dragX = mouseX;
+                dragY = mouseY;
+                cardSound(ModSounds.CARD_DRAW);
+                return true;
+            }
+        }
+        // The King's Sword is handed out here, during the proposal: clicking a picked teammate's avatar
+        // gives them the sword (clicking another moves it). The server validates and ignores it unless
+        // the rule is on and the seat is really on the team.
+        if (menu.isExcalibur()) {
+            int seat = seatAtPlate(mouseX, mouseY);
+            if (seat >= 0 && seat != menu.getLocalSeat()
+                    && (pendingMask() & (1 << seat)) != 0) {
+                localSwordOverride = true;
+                localSwordSeat = seat;
+                send(AvalonGame.SWORD_ASSIGN_BASE + seat);
+                cardSound(ModSounds.CARD_PLAY);
+                return true;
+            }
+        }
+        // Lifting the drafting sword: always allowed while the proposal is open, even when the team is
+        // already full -- dropping it on a picked seat takes that seat back out, which is how a completed
+        // team is corrected before Confirm.
+        if (menu.isExcalibur() && !swordPlaced() && inside(swordBox(), mouseX, mouseY)) {
+            carryingSword = true;
+            dragX = mouseX;
+            dragY = mouseY;
+            cardSound(ModSounds.CARD_DRAW);
+            return true;
+        }
+        // A marker in a socket: the click pulls it back out into the hand, so a misdrop is undone by
+        // taking the marker rather than by toggling the seat out from under it. A socket picked by the
+        // sword gives the sword back, not a flag: the hand should hold what was taken out of the box.
         for (int r = 0; r < ring.length; r++) {
             int seat = ring[r];
             if ((pendingMask() & (1 << seat)) != 0 && inside(flagSlotBox(r), mouseX, mouseY)) {

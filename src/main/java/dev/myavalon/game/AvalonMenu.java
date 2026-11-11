@@ -204,16 +204,170 @@ public class AvalonMenu extends AbstractCardMenu<AvalonGame, AvalonMenu> {
         return gameData.get(AvalonGame.SYNC_OPEN_QUESTS);
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Optional modules
+    // ---------------------------------------------------------------------------------------------
+
+    /** The local viewer's plot cards, as a bitmask over {@link AvalonPlot} ordinals. */
+    public int getPlotHand() {
+        return gameData.get(AvalonGame.SYNC_PLOT_HAND);
+    }
+
+    /** The local viewer's plot cards whose window is open right now. */
+    public int getUsablePlots() {
+        return gameData.get(AvalonGame.SYNC_PLOT_CAN_USE);
+    }
+
+    /** One of the leader's undelivered cards, or {@code null} once placed (or for another viewer). */
+    @Nullable
+    public AvalonPlot getDrawnPlot(int index) {
+        int ordinal = gameData.get(AvalonGame.SYNC_PLOT_DRAW_BASE + index);
+        return ordinal <= 0 ? null : AvalonPlot.at(ordinal - 1);
+    }
+
+    /** {@code true} while the No Confidence window is open. */
+    public boolean isVeto() {
+        return gameData.get(AvalonGame.SYNC_VETO) == 1;
+    }
+
+    /** The seat forced to show its quest card, or {@code -1}. */
+    public int getSpotlightSeat() {
+        return gameData.get(AvalonGame.SYNC_SPOTLIGHT);
+    }
+
+    /** The seat holding the Lady of the Lake, or {@code -1}. */
+    public int getLadyHolder() {
+        return gameData.get(AvalonGame.SYNC_LADY_HOLDER);
+    }
+
+    /** How many of the three inspections are gone. */
+    public int getLadyUses() {
+        return gameData.get(AvalonGame.SYNC_LADY_USES);
+    }
+
+    /** {@code true} when the local viewer is the Lady holder and it is their call. */
+    public boolean isLadyTurn() {
+        return gameData.get(AvalonGame.SYNC_LADY_ACTIVE) == 1;
+    }
+
+    /** Seats the local Lady holder may examine. */
+    public int getLadyEligible() {
+        return gameData.get(AvalonGame.SYNC_LADY_ELIGIBLE);
+    }
+
+    /**
+     * The seat examined by the last Angel use, or {@code -1}. Public: the act is announced to the whole
+     * table, and every client flies the reveal card out of that seat -- face down for all but the holder.
+     */
+    public int getLadyLastTarget() {
+        return gameData.get(AvalonGame.SYNC_LADY_TARGET);
+    }
+
+    /** {@code true} when this table plays the plot-card rule. */
+    public boolean isPlotCards() {
+        return gameData.get(AvalonGame.SYNC_PLOT_RULE) == 1;
+    }
+
+    /** {@code true} when this table plays the Angel rule. */
+    public boolean isLadyOfTheLake() {
+        return gameData.get(AvalonGame.SYNC_LADY_RULE) == 1;
+    }
+
+    /** {@code true} when the card tracker is on. */
+    public boolean isTracker() {
+        return gameData.get(AvalonGame.SYNC_TRACKER) == 1;
+    }
+
+    /** The seat the holder is pointing the King's Sword at while looking at a card, or {@code -1}. */
+    public int getSwordAim() {
+        return gameData.get(AvalonGame.SYNC_SWORD_AIM);
+    }
+
+    /** The seat whose quest card the King's Sword last turned over, or {@code -1}. */
+    public int getSwordFlipTarget() {
+        return gameData.get(AvalonGame.SYNC_SWORD_TARGET);
+    }
+
+    /** {@code true} when the King's Sword rule is on; the client gates Confirm on it. */
+    public boolean isExcalibur() {
+        return gameData.get(AvalonGame.SYNC_EXCALIBUR) == 1;
+    }
+
+    /**
+     * The seat that played the {@code index}-th card in the pile row, or {@code -1}.
+     *
+     * <p>The quest cards lie face down in play order and the server mirrors that order, so this is what
+     * both the "who played this" tooltip and the sword's card-click pair a card with its owner.
+     */
+    public int getQuestOrder(int index) {
+        if (index < 0 || index >= AvalonGame.SYNC_QUEST_ORDER_SLOTS) {
+            return -1;
+        }
+        int value = gameData.get(AvalonGame.SYNC_QUEST_ORDER_BASE + index);
+        return value <= 0 ? -1 : value - 1;
+    }
+
+    /** The seat holding the Royal Sword, or {@code -1}. */
+    public int getSwordHolder() {
+        return gameData.get(AvalonGame.SYNC_SWORD);
+    }
+
+    /** Seats the local leader may give the sword to, or the holder may flip. */
+    public int getSwordEligible() {
+        return gameData.get(AvalonGame.SYNC_SWORD_ELIGIBLE);
+    }
+
+    /** {@code true} while the leader is handing out the sword. */
+    public boolean isSwordPhase() {
+        return getPhase() == AvalonGame.Phase.SWORD;
+    }
+
+    /** {@code true} while the sword holder may use it. */
+    public boolean isSwingPhase() {
+        return getPhase() == AvalonGame.Phase.SWING;
+    }
+
+    /** {@code 1} good, {@code 2} evil, {@code 0} none: the last loyalty reveal shown to this viewer. */
+    public int getRevealFaction() {
+        return gameData.get(AvalonGame.SYNC_REVEAL_FACTION);
+    }
+
+    /** The subject of that reveal, or {@code -1}. */
+    public int getRevealSeat() {
+        return gameData.get(AvalonGame.SYNC_REVEAL_SEAT);
+    }
+
+    /** Changes whenever a new reveal arrives; the client keys its toast off it. */
+    public int getRevealStamp() {
+        return gameData.get(AvalonGame.SYNC_REVEAL_STAMP);
+    }
+
+    /** {@code true} when reveals are drawn as loyalty cards. */
+    public boolean isLoyaltyCards() {
+        return gameData.get(AvalonGame.SYNC_LOYALTY) == 1;
+    }
+
     /**
      * Four bits per {@link AvalonRole} ordinal: how many of that role this deal put on the table.
      *
-     * <p>Two data slots, reassembled here. Both are masked because a container data value travels as a
-     * signed short, so the upper half would otherwise come through sign-extended.
+     * <p>Three data slots, reassembled here. Every one is masked because a container data value travels
+     * as a signed short, so the upper half would otherwise come through sign-extended.
      */
-    public int getRoleCensus() {
-        int low = gameData.get(AvalonGame.SYNC_CENSUS) & 0xFFFF;
-        int high = gameData.get(AvalonGame.SYNC_CENSUS_HIGH) & 0xFFFF;
-        return low | (high << 16);
+    public long getRoleCensus() {
+        long low = gameData.get(AvalonGame.SYNC_CENSUS) & 0xFFFF;
+        long high = gameData.get(AvalonGame.SYNC_CENSUS_HIGH) & 0xFFFF;
+        long top = gameData.get(AvalonGame.SYNC_CENSUS_TOP) & 0xFFFF;
+        return low | (high << 16) | (top << 32);
+    }
+
+    /** {@code true} when the Lancelot expansion is in play. */
+    public boolean isLancelot() {
+        return gameData.get(AvalonGame.SYNC_LANCELOT) == 1;
+    }
+
+    /** {@code true} while both wolves are on their other side. */
+    public boolean isLancelotSwapped() {
+        return gameData.get(AvalonGame.SYNC_LANCELOT_SWAP) == 1;
     }
 
     public int getLeaderSeat() {

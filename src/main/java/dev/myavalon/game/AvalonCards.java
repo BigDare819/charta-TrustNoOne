@@ -65,6 +65,8 @@ public final class AvalonCards {
     public static Rank MORDRED;
     public static Rank OBERON;
     public static Rank MINION;
+    public static Rank LANCELOT_GOOD;
+    public static Rank LANCELOT_EVIL;
 
     public static Rank YES;
     public static Rank NO;
@@ -98,6 +100,8 @@ public final class AvalonCards {
         MORDRED = rank("mordred", 105);
         OBERON = rank("oberon", 106);
         MINION = rank("minion", 107);
+        LANCELOT_GOOD = rank("lancelot_good", 108);
+        LANCELOT_EVIL = rank("lancelot_evil", 109);
 
         YES = rank("yes", 200);
         NO = rank("no", 201);
@@ -116,6 +120,8 @@ public final class AvalonCards {
         bind(AvalonRole.MORDRED, MORDRED);
         bind(AvalonRole.OBERON, OBERON);
         bind(AvalonRole.MINION, MINION);
+        bind(AvalonRole.LANCELOT_GOOD, LANCELOT_GOOD);
+        bind(AvalonRole.LANCELOT_EVIL, LANCELOT_EVIL);
     }
 
     private static Suit suit(String path) {

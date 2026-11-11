@@ -11,6 +11,8 @@ import net.minecraft.network.chat.MutableComponent;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Consumer;
 
 /**
@@ -91,6 +93,15 @@ public class AvalonRolesScreen extends Screen {
     /** The identities and their dealt counts, so "what is actually on this table" reads at a glance. */
     private Component lineup = Component.empty();
 
+    /**
+     * Why this set cannot be played, or {@code null} when it can. A setup that would deal a good/evil
+     * split other than the printed one (or that switched the wolf rule on without the two plain seats it
+     * takes over) is refused by the server; saying so here is what turns that refusal into a sentence a
+     * player can act on instead of a Play button that simply will not light.
+     */
+    @Nullable
+    private Component unusable;
+
     /** Top of the button row, kept for the count line, which hangs under it. */
     private int buttonsY;
 
@@ -119,11 +130,10 @@ public class AvalonRolesScreen extends Screen {
 
         // How many of each identity the set actually deals, counted off the very list {@code dealRoles}
         // uses -- so the numbers are the deal's, not a second opinion: the padding of a short set and the
-        // trimming of an over-full one are both visible here, on the row they land on.
-        int[] dealt = new int[AvalonRole.values().length];
-        for (AvalonRole role : AvalonRole.compose(seats, mask)) {
-            dealt[role.ordinal()]++;
-        }
+        // trimming of an over-full one are both visible here, on the row they land on. The optional-rule
+        // edits ride along too: Oberon vanishes when the cunning rule is off, and the wolves take their
+        // plain seat each, exactly as the deal will build it.
+        int[] dealt = AvalonRole.lineup(seats, mask, game.cunningAssassin(), game.lancelotOption());
 
         // The concrete set, not just a total: which identities, and how many of each the deal makes.
         MutableComponent list = Component.empty();
@@ -141,8 +151,23 @@ public class AvalonRolesScreen extends Screen {
                     role.coloredName(), Integer.toString(count)));
         }
         this.lineup = Component.translatable("reveal.myavalon.roles_in_play", list);
+        this.unusable = AvalonRole.setupMatches(seats, mask, game.cunningAssassin(), game.lancelotOption())
+                ? null
+                : Component.translatable("roles.myavalon.invalid",
+                AvalonRole.goodCount(seats, mask), AvalonRole.evilCount(seats, mask),
+                AvalonRole.goodCount(seats), AvalonRole.evilCount(seats));
 
-        int rows = AvalonRole.LOCKED.size() + AvalonRole.OPTIONAL.size();
+        // The wolves are not part of the mask -- the optional rule seats them over one Villager and one
+        // Minion -- so they get their own read-only rows at the tail whenever that rule is on. Locked,
+        // like Merlin and the Assassin: clicking cannot change them, the rule is what does. Without this
+        // the setup never named 善狼/恶狼 at all, and a player turning the rule on had to infer the pair
+        // from the villager count quietly dropping by one.
+        List<AvalonRole> wolves = new ArrayList<>();
+        if (game.lancelotOption()) {
+            wolves.add(AvalonRole.LANCELOT_GOOD);
+            wolves.add(AvalonRole.LANCELOT_EVIL);
+        }
+        int rows = AvalonRole.LOCKED.size() + AvalonRole.OPTIONAL.size() + wolves.size();
         int block = rows * (ROW_H + ROW_GAP);
         int top = Math.max(26, (height - block) / 2 - 12);
         int left = width / 2 - COL_W / 2;
@@ -154,6 +179,9 @@ public class AvalonRolesScreen extends Screen {
         }
         for (AvalonRole role : AvalonRole.OPTIONAL) {
             roleRow(role, row++, left, top, mask, false, dealt[role.ordinal()]);
+        }
+        for (AvalonRole role : wolves) {
+            roleRow(role, row++, left, top, mask, true, dealt[role.ordinal()]);
         }
 
         int bottom = top + block + 6;
@@ -222,7 +250,12 @@ public class AvalonRolesScreen extends Screen {
         // line follows them down instead of being drawn through them.
         int countY = Math.max(buttonsY + ROW_H + 4, height - 38);
         guiGraphics.drawCenteredString(font, countLine, width / 2, countY, 0xFFCFCFCF);
-        guiGraphics.drawCenteredString(font, lineup, width / 2, countY + 12, 0xFFAFAFAF);
+        if (unusable != null) {
+            // Only the verdict, no role list: when the set cannot be played, "what it would deal" is noise.
+            guiGraphics.drawCenteredString(font, unusable, width / 2, countY + 12, 0xFFE2716F);
+        } else {
+            guiGraphics.drawCenteredString(font, lineup, width / 2, countY + 12, 0xFFAFAFAF);
+        }
     }
 
     @Override

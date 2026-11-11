@@ -68,6 +68,15 @@ public final class AvalonLayout {
     private static final int CROWN_BOX_W = 22;
     private static final int CROWN_BOX_H = 22;
 
+    /** The angel badge's square, for the seats across the table: about the size of the chip's avatar. */
+    private static final int ANGEL_BOX_W = 16;
+    private static final int ANGEL_BOX_H = 22;
+    /** The local angel is a full card beside the hand, at the size a card in that fan is drawn. */
+    private static final int SELF_ANGEL_W = 38;
+    private static final int SELF_ANGEL_H = 53;
+    /** The drafting sword's square on the proposal bar. */
+    private static final int SWORD_BOX = 26;
+
     /** The quest board's proportions on its 2020x1180 source art; it spans 9/16 of the frame wide. */
     private static final float TASK_CARD_WIDTH_RATIO = 9f / 16f;
     private static final float TASK_CARD_ASPECT = 1180f / 2020f;
@@ -170,7 +179,33 @@ public final class AvalonLayout {
         QUEST_SLOT_2("quest_slot_2", 48, 48),
         QUEST_SLOT_3("quest_slot_3", 48, 48),
         QUEST_SLOT_4("quest_slot_4", 48, 48),
-        QUEST_SLOT_5("quest_slot_5", 48, 48);
+        QUEST_SLOT_5("quest_slot_5", 48, 48),
+        /**
+         * The angel badge that marks who holds the Lady of the Lake, one per seat and one for the local
+         * player — whose plate is not painted, so their badge hangs beside the hand instead. Appended
+         * last like the quest slots: the ordinal ranges of the seat families must not shift, and a saved
+         * layout file that predates these simply leaves them at their defaults.
+         */
+        SELF_ANGEL("self_angel", SELF_ANGEL_W, SELF_ANGEL_H),
+        ANGEL_1("angel_1", ANGEL_BOX_W, ANGEL_BOX_H),
+        ANGEL_2("angel_2", ANGEL_BOX_W, ANGEL_BOX_H),
+        ANGEL_3("angel_3", ANGEL_BOX_W, ANGEL_BOX_H),
+        ANGEL_4("angel_4", ANGEL_BOX_W, ANGEL_BOX_H),
+        ANGEL_5("angel_5", ANGEL_BOX_W, ANGEL_BOX_H),
+        ANGEL_6("angel_6", ANGEL_BOX_W, ANGEL_BOX_H),
+        ANGEL_7("angel_7", ANGEL_BOX_W, ANGEL_BOX_H),
+        ANGEL_8("angel_8", ANGEL_BOX_W, ANGEL_BOX_H),
+        ANGEL_9("angel_9", ANGEL_BOX_W, ANGEL_BOX_H),
+        /**
+         * The King's Sword marker for the local seat: the mirror of the local angel card, on the other
+         * side of the hand, at a team flag's size (the flags ship at {@code FLAG_DEFAULT_SCALE}).
+         */
+        SELF_SWORD("self_sword", FLAG_SIZE, FLAG_SIZE),
+        /**
+         * The drafting sword the proposal bar gains: the leader lifts it and drops it on a player's
+         * avatar to pick them. One element for the whole table — it is a tool, not a per-seat marker.
+         */
+        SWORD_SELECT("sword_select", SWORD_BOX, SWORD_BOX);
 
         /** Config key, and the suffix of this element's {@code editor.myavalon.*} label. */
         public final String key;
@@ -213,6 +248,23 @@ public final class AvalonLayout {
 
         int questSlotIndex() {
             return ordinal() - QUEST_SLOT_1.ordinal();
+        }
+
+        boolean isOtherAngel() {
+            return ordinal() >= ANGEL_1.ordinal() && ordinal() <= ANGEL_9.ordinal();
+        }
+
+        int otherAngelIndex() {
+            return ordinal() - ANGEL_1.ordinal();
+        }
+
+        public static Element otherAngel(int index) {
+            return values()[ANGEL_1.ordinal() + Math.min(8, Math.max(0, index))];
+        }
+
+        /** The angel badge of the seat at {@code ringIndex}: the local one, or another seat's. */
+        public static Element angel(int ringIndex) {
+            return ringIndex == 0 ? SELF_ANGEL : otherAngel(ringIndex - 1);
         }
 
         public static Element questSlot(int index) {
@@ -477,7 +529,8 @@ public final class AvalonLayout {
      * speck next to a top-bar chip, and at 240% it reads as the badge it is meant to be.
      */
     private static float defaultScale(Element element) {
-        return element == Element.SELF_FLAG || element.isOtherFlag() ? FLAG_DEFAULT_SCALE : 1f;
+        return element == Element.SELF_FLAG || element == Element.SELF_SWORD || element.isOtherFlag()
+                ? FLAG_DEFAULT_SCALE : 1f;
     }
 
     /** The scale a marker is authored at, as a multiple of its 13-pixel art. */
@@ -668,6 +721,37 @@ public final class AvalonLayout {
             int[] marker = box(Element.otherFlag(index), screenWidth, screenHeight);
             return new int[]{chip[0] + width / 2 + 2,
                     marker[1] + marker[3] / 2 - height / 2, width, height};
+        }
+        if (element == Element.SELF_ANGEL) {
+            // Beside the local hand, bottom-aligned with it: the angel is a card at the size the fan's
+            // own cards are drawn, so it reads as one more card laid down next to the hand. The local
+            // seat has no painted plate to ride, and below the hand is the screen edge.
+            int[] hand = box(Element.SELF_HAND, screenWidth, screenHeight);
+            return new int[]{hand[0] + hand[2] + 6, hand[1] + hand[3] - height, width, height};
+        }
+        if (element.isOtherAngel()) {
+            // On the avatar itself: the angel rides the head in the chip's left half, overlapping it so
+            // it reads as pinned to the player rather than to the chip's furniture, and at about the
+            // head's own size. Anchored through the chip, so an F9 drag of the chip carries it along.
+            int index = element.otherAngelIndex();
+            Element chip = Element.otherPlate(index);
+            float chipScale = scale(chip);
+            int[] chipBox = box(chip, screenWidth, screenHeight);
+            return new int[]{chipBox[0] + Math.round(10 * chipScale),
+                    chipBox[1] + Math.round(14 * chipScale), width, height};
+        }
+        if (element == Element.SELF_SWORD) {
+            // The mirror of the local angel card: the other side of the hand, bottom-aligned with it. A
+            // flag-sized marker (the element ships at FLAG_DEFAULT_SCALE), because it is a marker in the
+            // same family as the team flags, not a card.
+            int[] hand = box(Element.SELF_HAND, screenWidth, screenHeight);
+            return new int[]{hand[0] - width - 6, hand[1] + hand[3] - height, width, height};
+        }
+        if (element == Element.SWORD_SELECT) {
+            // Just left of the pile, on its centre line: the spare flags own the pile's strip, and the
+            // sword is the tool that works that row rather than one of its markers.
+            int[] pile = box(Element.PILE, screenWidth, screenHeight);
+            return new int[]{pile[0] - width - 6, pile[1] + pile[3] / 2 - height / 2, width, height};
         }
         if (element == Element.CONFIRM) {
             // Sits on the pile's centre: the spare flags are drawn there and this replaces them.

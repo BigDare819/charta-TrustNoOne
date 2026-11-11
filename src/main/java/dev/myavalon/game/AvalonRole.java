@@ -39,7 +39,14 @@ public enum AvalonRole {
     MORGANA(Faction.EVIL, "morgana", false),
     MORDRED(Faction.EVIL, "mordred", false),
     OBERON(Faction.EVIL, "oberon", false),
-    MINION(Faction.EVIL, "minion", false);
+    MINION(Faction.EVIL, "minion", false),
+    /**
+     * The two halves of the Lancelot expansion. They are not part of {@link #compose}; the game's
+     * Lancelot option swaps them in for a plain loyalist and a plain minion at deal time. Their
+     * {@code faction} is their <em>starting</em> side; the rule's loyalty deck can turn it over.
+     */
+    LANCELOT_GOOD(Faction.GOOD, "lancelot_good", false),
+    LANCELOT_EVIL(Faction.EVIL, "lancelot_evil", false);
 
     public enum Faction {
         GOOD, EVIL;
@@ -103,6 +110,10 @@ public enum AvalonRole {
             case MORDRED -> "ender_dragon";
             case OBERON -> "phantom";
             case MINION -> "zombie";
+            // Both Lancelots are the wolf in the art. The evil one needs its own answer for
+            // /myavalon rate role, so it takes a role-level id rather than a second vanilla entity.
+            case LANCELOT_GOOD -> "wolf";
+            case LANCELOT_EVIL -> "wolf_evil";
         };
     }
 
@@ -145,6 +156,8 @@ public enum AvalonRole {
         MENTIONS.put(OBERON, new AvalonRole[]{OBERON, OBERON, MERLIN, OBERON});
         MENTIONS.put(MORDRED, new AvalonRole[]{MORDRED, MERLIN});
         MENTIONS.put(MINION, new AvalonRole[]{MINION});
+        MENTIONS.put(LANCELOT_GOOD, new AvalonRole[]{LANCELOT_EVIL});
+        MENTIONS.put(LANCELOT_EVIL, new AvalonRole[]{LANCELOT_GOOD});
     }
 
     /** {@code card.myavalon.merlin} -> {@link #MERLIN}, so a hovered card can find its own comment. */
@@ -375,6 +388,73 @@ public enum AvalonRole {
 
     public static int evilCount(int players, int mask) {
         return compose(players, mask).size() - goodCount(players, mask);
+    }
+
+    /**
+     * The set a table would actually deal, as counts per role: {@code counts[role.ordinal()]}.
+     *
+     * <p>This is {@code AvalonGame.dealRoles}' composition read before it is needed — the same Oberon
+     * drop when the cunning-assassin rule is off, the same pad and trim to the table size, and the same
+     * hand-over of one Villager and one Minion to the wolves — so a screen showing "what is coming" shows
+     * the deal's own set and never a second opinion of it. Order is irrelevant; only the tally survives.
+     */
+    public static int[] lineup(int players, int mask, boolean cunning, boolean lancelot) {
+        List<AvalonRole> roles = new ArrayList<>(compose(players, mask));
+        if (!cunning) {
+            roles.remove(OBERON);
+        }
+        while (roles.size() < players) {
+            roles.add(LOYALIST);
+        }
+        while (roles.size() > players) {
+            roles.remove(roles.size() - 1);
+        }
+        if (lancelot) {
+            int good = roles.indexOf(LOYALIST);
+            if (good >= 0) {
+                roles.set(good, LANCELOT_GOOD);
+            }
+            int evil = roles.indexOf(MINION);
+            if (evil >= 0) {
+                roles.set(evil, LANCELOT_EVIL);
+            }
+        }
+        int[] counts = new int[values().length];
+        for (AvalonRole role : roles) {
+            counts[role.ordinal()]++;
+        }
+        return counts;
+    }
+
+    /**
+     * Whether a custom setup would deal a table that still obeys the printed good/evil split.
+     *
+     * <p>The split is the one thing a setup may not bend: the whole game -- quest sizes, the assassin's
+     * win, every bot's arithmetic -- is tuned to the printed ratio, so a set that deals four good seats
+     * into a three-good table is not a variant, it is a different game. This compares the actual deal
+     * (through {@link #lineup}, which applies Oberon's drop and the wolves' seats) against
+     * {@link #goodCount}/{@link #evilCount} for the same table size.
+     *
+     * <p>The wolf rule is a conflict of its own: it needs one plain Villager and one plain Minion to
+     * take over, and the rule text has always said so. Without them the wolves simply never seat, which
+     * turns a rule the player switched on into a no-op.
+     */
+    public static boolean setupMatches(int players, int mask, boolean cunning, boolean lancelot) {
+        int[] counts = lineup(players, mask, cunning, lancelot);
+        int good = 0;
+        int evil = 0;
+        for (AvalonRole role : values()) {
+            if (role.isGood()) {
+                good += counts[role.ordinal()];
+            } else if (role.isEvil()) {
+                evil += counts[role.ordinal()];
+            }
+        }
+        if (good != goodCount(players) || evil != evilCount(players)) {
+            return false;
+        }
+        return !lancelot
+                || counts[LANCELOT_GOOD.ordinal()] > 0 && counts[LANCELOT_EVIL.ordinal()] > 0;
     }
 
     /**

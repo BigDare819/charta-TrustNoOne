@@ -204,20 +204,22 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
      */
     public static final int SYNC_STATS_BASE = SYNC_NO_VOTERS + 1;
     /**
-     * Two slots: how many of each role this deal put on the table, four bits per role ordinal.
+     * Three slots: how many of each role this deal put on the table, four bits per role ordinal.
      *
      * <p>Public information at the start of a game -- the printed setup names every identity in play --
      * but the client cannot derive it: the identity setup is an option, the cunning-assassin rule can
      * drop Oberon, and a short table pads itself with loyalists. Counts top out at {@code MAX_SEATS},
-     * well inside a nibble, but eight nibbles are 32 bits and a container data slot is a <b>short</b>:
+     * well inside a nibble, but ten nibbles are 40 bits and a container data slot is a <b>short</b>:
      * the value arrives through {@code ClientboundContainerSetDataPacket}, which writes and reads it as
-     * a signed 16-bit number. So the census is split across two slots and the client reassembles it.
+     * a signed 16-bit number. So the census is split across three slots and the client reassembles it.
      */
     public static final int SYNC_CENSUS = SYNC_STATS_BASE + MAX_SEATS;
-    /** The upper four role ordinals' counts; see {@link #SYNC_CENSUS}. */
+    /** Bits 16-31 of the census; see {@link #SYNC_CENSUS}. */
     public static final int SYNC_CENSUS_HIGH = SYNC_CENSUS + 1;
+    /** Bits 32-39 of the census, which is all the two Lancelot nibbles need. */
+    public static final int SYNC_CENSUS_TOP = SYNC_CENSUS_HIGH + 1;
     /** One slot: {@code 1} while the designated-quest rule is on. */
-    public static final int SYNC_DESIGNATED = SYNC_CENSUS_HIGH + 1;
+    public static final int SYNC_DESIGNATED = SYNC_CENSUS_TOP + 1;
     /**
      * One slot: the quests the leader may pick right now, as a bitmask.
      *
@@ -226,7 +228,71 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
      * pickable slots from this exactly as the server validates them.
      */
     public static final int SYNC_OPEN_QUESTS = SYNC_DESIGNATED + 1;
-    public static final int SYNC_SIZE = SYNC_OPEN_QUESTS + 1;
+    /** The viewer's plot cards, as a bitmask over {@link AvalonPlot} ordinals. */
+    public static final int SYNC_PLOT_HAND = SYNC_OPEN_QUESTS + 1;
+    /** The viewer's plot cards whose window is open right now, same bit layout. */
+    public static final int SYNC_PLOT_CAN_USE = SYNC_PLOT_HAND + 1;
+    /** The most cards one leader can draw in a round; one slot each while distributing. */
+    public static final int MAX_PLOT_DRAW = 3;
+    /** One slot per drawn card: its ordinal + 1, or {@code 0} once it has been handed out. */
+    public static final int SYNC_PLOT_DRAW_BASE = SYNC_PLOT_CAN_USE + 1;
+    /** {@code 1} while the No Confidence window is open. */
+    public static final int SYNC_VETO = SYNC_PLOT_DRAW_BASE + MAX_PLOT_DRAW;
+    /** The seat forced to play its quest card face up, or {@code -1}. */
+    public static final int SYNC_SPOTLIGHT = SYNC_VETO + 1;
+    /** The seat holding the Lady of the Lake, or {@code -1} when the rule is off. */
+    public static final int SYNC_LADY_HOLDER = SYNC_SPOTLIGHT + 1;
+    /** How many of the three Lady uses are gone. */
+    public static final int SYNC_LADY_USES = SYNC_LADY_HOLDER + 1;
+    /** {@code 1} while the local viewer is the Lady holder and owes the table a choice. */
+    public static final int SYNC_LADY_ACTIVE = SYNC_LADY_USES + 1;
+    /** Seats the local Lady holder may examine, as a bitmask. */
+    public static final int SYNC_LADY_ELIGIBLE = SYNC_LADY_ACTIVE + 1;
+    /**
+     * The last loyalty reveal shown to this viewer: the subject's seat and faction.
+     *
+     * <p>Per-viewer because the reveal is secret -- two seats' mirrors say different things -- and
+     * stamped so the client can tell a new reveal from the same one redrawn on the next frame.
+     */
+    public static final int SYNC_REVEAL_SEAT = SYNC_LADY_ELIGIBLE + 1;
+    public static final int SYNC_REVEAL_FACTION = SYNC_REVEAL_SEAT + 1;
+    public static final int SYNC_REVEAL_STAMP = SYNC_REVEAL_FACTION + 1;
+    /** {@code 1} when the loyalty-card rule is on and reveals are drawn as cards. */
+    public static final int SYNC_LOYALTY = SYNC_REVEAL_STAMP + 1;
+    /** The seat holding the Royal Sword, or {@code -1}. */
+    public static final int SYNC_SWORD = SYNC_LOYALTY + 1;
+    /** Seats the sword may be given to (SWORD) or turned on (SWING), as a bitmask. */
+    public static final int SYNC_SWORD_ELIGIBLE = SYNC_SWORD + 1;
+    /** {@code 1} while the Lancelot rule is on and at least one wolf is seated. */
+    public static final int SYNC_LANCELOT = SYNC_SWORD_ELIGIBLE + 1;
+    /** {@code 1} while both wolves are on their other side -- public, because the drew card is. */
+    public static final int SYNC_LANCELOT_SWAP = SYNC_LANCELOT + 1;
+    /**
+     * The seat the Angel examined last, or {@code -1}. Public on purpose: the act is announced to the
+     * table anyway ({@code message.myavalon.lady_used}), and the reveal card has to fly to the middle
+     * for every client -- face down for all but the holder, whose own mirror carries the answer.
+     */
+    public static final int SYNC_LADY_TARGET = SYNC_LANCELOT_SWAP + 1;
+    /** {@code 1} when the King's Sword rule is on. Public: the client gates Confirm on it. */
+    public static final int SYNC_EXCALIBUR = SYNC_LADY_TARGET + 1;
+    /**
+     * Who played the {@code i}-th card in the pile row, as seat + 1 ({@code 0} past the end). Public:
+     * the quest cards lie face down in play order, and both the "who played this" tooltip and the
+     * sword's card-click need the pair up.
+     */
+    public static final int SYNC_QUEST_ORDER_BASE = SYNC_EXCALIBUR + 1;
+    public static final int SYNC_QUEST_ORDER_SLOTS = 5;
+    /** {@code 1} when the card-tracker panel option is on. */
+    public static final int SYNC_TRACKER = SYNC_QUEST_ORDER_BASE + SYNC_QUEST_ORDER_SLOTS;
+    /** The seat whose quest card the King's Sword last turned over, or {@code -1}. */
+    public static final int SYNC_SWORD_TARGET = SYNC_TRACKER + 1;
+    /** The seat the holder is currently pointing the sword at, or {@code -1}. */
+    public static final int SYNC_SWORD_AIM = SYNC_SWORD_TARGET + 1;
+    /** {@code 1} when the Angel rule is on. The client's tracker must not invent one when it is off. */
+    public static final int SYNC_LADY_RULE = SYNC_SWORD_AIM + 1;
+    /** {@code 1} when the plot-card rule is on (shown on the opening act's rules line). */
+    public static final int SYNC_PLOT_RULE = SYNC_LADY_RULE + 1;
+    public static final int SYNC_SIZE = SYNC_PLOT_RULE + 1;
 
     /**
      * Dealing pace, in ticks. The table sits still for {@link #DEAL_SETTLE} ticks (the stack of face-down
@@ -247,6 +313,33 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
     public static final int TOGGLE_BASE = 0;
     public static final int PICK_BASE = 16;
     public static final int CONFIRM = 32;
+    /** Royal Sword: the leader's hand-out and the holder's flip, plus a pass. */
+    public static final int SWORD_ASSIGN_BASE = 512;
+    public static final int SWORD_STRIKE_BASE = 640;
+    public static final int SWORD_PASS = SWORD_STRIKE_BASE + 15;
+    /** Takes a placed King's Sword back off a member during the proposal (the leader keeps it in hand). */
+    public static final int SWORD_RETRIEVE = SWORD_ASSIGN_BASE + MAX_SEATS;
+    /**
+     * The holder's aim, announced while they are looking at a card: {@code SWORD_AIM_BASE + seat}, and
+     * {@link #SWORD_AIM_CLEAR} to put the sword back down without a target. Public because the table has
+     * to be able to read "X has pointed the sword at Y" while the holder decides.
+     */
+    public static final int SWORD_AIM_BASE = 660;
+    public static final int SWORD_AIM_CLEAR = SWORD_AIM_BASE + MAX_SEATS;
+    /**
+     * Plot-card action blocks. One int carries both the card and the seat it was aimed at, in one
+     * click-pair, so the server never has to remember a half-finished selection per player.
+     *
+     * <p>The low four bits are the seat and {@link #NO_TARGET} means "no seat needed"; the card ordinal
+     * sits above them. The two blocks are wide enough for every ordinal and every seat, and far enough
+     * apart that a malformed value cannot be mistaken for the other kind of action.
+     */
+    public static final int PLOT_GIVE_BASE = 1024;
+    public static final int PLOT_USE_BASE = 2048;
+    /** Lady inspections: {@code LADY_BASE + seat}. */
+    public static final int LADY_BASE = 4096;
+    public static final int LADY_SKIP = LADY_BASE + 15;
+    public static final int NO_TARGET = 15;
 
     public enum Phase {
         DEALING,
@@ -254,7 +347,17 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
         VOTE,
         QUEST,
         ASSASSIN,
-        OVER
+        OVER,
+        /** Plot cards are being handed out at the start of a quest round. Leader only. */
+        PLOTS,
+        /** The Lady of the Lake holder is choosing somebody to examine. */
+        LADY,
+        /** A team was approved; holders of "No Confidence" get a beat to veto it. */
+        VETO,
+        /** The leader is giving the Royal Sword to a member of the confirmed team. */
+        SWORD,
+        /** The Royal Sword holder may flip one team member's quest card before the reveal. */
+        SWING
     }
 
     /** Who won: {@code 0} undecided, {@code 1} good, {@code 2} evil. */
@@ -273,18 +376,6 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
             AvalonRole.MIN_PLAYERS, AvalonRole.MIN_PLAYERS, MAX_SEATS,
             net.minecraft.network.chat.Component.translatable("rule.myavalon.seats"),
             net.minecraft.network.chat.Component.translatable("rule.myavalon.seats.description")
-    );
-
-    private final GameOption.Number BOT_STRENGTH = new SteppedOption(
-            AvalonStrength.NORMAL.ordinal(), 0, AvalonStrength.values().length - 1,
-            net.minecraft.network.chat.Component.translatable("rule.myavalon.bot_strength"),
-            net.minecraft.network.chat.Component.translatable("rule.myavalon.bot_strength.description")
-    );
-
-    private final GameOption.Bool CUNNING_ASSASSIN = new GameOption.Bool(
-            true,
-            net.minecraft.network.chat.Component.translatable("rule.myavalon.cunning_assassin"),
-            net.minecraft.network.chat.Component.translatable("rule.myavalon.cunning_assassin.description")
     );
 
     /**
@@ -344,6 +435,71 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
             false,
             net.minecraft.network.chat.Component.translatable("rule.myavalon.designated_quests"),
             net.minecraft.network.chat.Component.translatable("rule.myavalon.designated_quests.description")
+    );
+
+    /**
+     * The plot-card module (谋略卡).
+     *
+     * <p>At the start of every quest round the leader draws one card per two seats past four and hands
+     * each to a different player; everybody sees who got what. A card's own window decides when it can be
+     * played. See {@link AvalonPlot}.
+     */
+    private final GameOption.Bool PLOT_CARDS = new GameOption.Bool(
+            false,
+            net.minecraft.network.chat.Component.translatable("rule.myavalon.plot_cards"),
+            net.minecraft.network.chat.Component.translatable("rule.myavalon.plot_cards.description")
+    );
+
+    /**
+     * The Lady of the Lake (湖上夫人).
+     *
+     * <p>One public token, starting with the seat to the right of the first leader. After the second,
+     * third and fourth quests its holder examines one player's faction and then hands the token over.
+     * A seat that has examined somebody can never be examined itself, which is what keeps the three uses
+     * from being spent on the same two people.
+     */
+    private final GameOption.Bool LADY_OF_THE_LAKE = new GameOption.Bool(
+            false,
+            net.minecraft.network.chat.Component.translatable("rule.myavalon.lady_of_the_lake"),
+            net.minecraft.network.chat.Component.translatable("rule.myavalon.lady_of_the_lake.description")
+    );
+
+    /**
+     * The Royal Sword (王族之剑, Excalibur).
+     *
+     * <p>The leader must give the sword to a member of the confirmed team, and after the quest cards are
+     * down but before they are turned over the holder may name one other member: that card is flipped and
+     * the holder is told what it originally was. The use and its target are public; the card itself is
+     * not. The loyalty-card module is implied by the Lady and the plot cards and needs no switch of its
+     * own -- every loyalty answer is drawn as a card while one of those rules is on.
+     */
+    private final GameOption.Bool EXCALIBUR = new GameOption.Bool(
+            false,
+            net.minecraft.network.chat.Component.translatable("rule.myavalon.excalibur"),
+            net.minecraft.network.chat.Component.translatable("rule.myavalon.excalibur.description")
+    );
+
+    /**
+     * The Lancelot pair (兰斯洛特).
+     *
+     * <p>Two plain seats are dealt as the two wolves: a loyalist becomes the good wolf, a minion the evil
+     * one. A five-card loyalty deck -- three "no change", two "switch" -- is turned over after the second,
+     * third and fourth quests; a switch card puts <em>both</em> wolves on their other side. Their current
+     * side is what decides whether they may play a fail card, how the bots treat them, and which side they
+     * are credited with at the end. Their dealt role, and what Merlin and the other evil seats know about
+     * them, stays frozen at the deal.
+     */
+    /** The compact on-screen card tracker; on by default, and purely a display. */
+    private final GameOption.Bool TRACKER = new GameOption.Bool(
+            true,
+            net.minecraft.network.chat.Component.translatable("rule.myavalon.tracker"),
+            net.minecraft.network.chat.Component.translatable("rule.myavalon.tracker.description")
+    );
+
+    private final GameOption.Bool LANCELOT = new GameOption.Bool(
+            false,
+            net.minecraft.network.chat.Component.translatable("rule.myavalon.lancelot"),
+            net.minecraft.network.chat.Component.translatable("rule.myavalon.lancelot.description")
     );
 
     /**
@@ -411,8 +567,13 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
 
     /** Seats this game was dealt a role to, indexed by seat. Empty until the deal finishes. */
     private final List<AvalonRole> roles = new ArrayList<>();
-    /** Four bits per role ordinal: how many of that role this deal put on the table. */
-    private int roleCensus;
+    /**
+     * Four bits per role ordinal: how many of that role this deal put on the table.
+     *
+     * <p>A {@code long} since the Lancelot pair took the roster to ten roles: forty bits no longer fit in
+     * an int, and the client reassembles the three 16-bit slots this is mirrored through.
+     */
+    private long roleCensus;
     private int merlinSeat = -1;
     private int morganaSeat = -1;
     private int assassinSeat = -1;
@@ -470,6 +631,12 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
     private final java.util.Set<Integer> voted = new java.util.LinkedHashSet<>();
     private int yesVotes;
     private final java.util.Set<Integer> quested = new java.util.LinkedHashSet<>();
+    /** Seats whose cards are in the pile, in the order they landed: the pile's own index order. */
+    private final java.util.List<Integer> questPlayOrder = new java.util.ArrayList<>();
+    /** The seat whose card the sword last turned over, public for the tracker. */
+    private int swordFlipTarget = -1;
+    /** The seat the holder is pointing the sword at while looking at a card, public. */
+    private int swordAim = -1;
     private int questFails;
 
     /**
@@ -490,6 +657,86 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
      * voted down was still picked right, and the leader is the one who picked it.
      */
     private int[] cleanTeams = new int[AvalonRole.MAX_PLAYERS];
+
+    // ---------------------------------------------------------------------------------------------
+    // Optional modules: plot cards, the Lady of the Lake and the loyalty cards
+    // ---------------------------------------------------------------------------------------------
+
+    /** The cards not drawn yet, shuffled once per game. */
+    private final List<AvalonPlot> plotDeck = new ArrayList<>();
+    /** What each seat holds, indexed by seat. Public information, but only a seat knows its own hand. */
+    private final List<List<AvalonPlot>> plotHands = new ArrayList<>();
+    /** The cards the leader has drawn this round and not handed out yet. */
+    private final List<AvalonPlot> plotDrawn = new ArrayList<>();
+    /** Parallel to {@link #plotDrawn}: the recipient seat, or {@code -1} while still in the leader's hand. */
+    private final List<Integer> plotDrawnTo = new ArrayList<>();
+    /** {@code true} until this quest round's draw has happened; a rejected team must not redraw. */
+    private boolean plotDrawPending;
+    /** Ticks before a bot leader hands its drawn cards out. */
+    private int plotDelay;
+    /** One "Strong Leader" per proposal is enough; a second would only shuffle the same chairs. */
+    private boolean strongLeaderUsed;
+    /** Ticks left in the No Confidence window. */
+    private int vetoTicks;
+    /** Ticks before the bot holders make up their mind about a veto. */
+    private int vetoBotDelay;
+    /** The seat holding the Lady of the Lake, or {@code -1}. */
+    private int ladyHolder = -1;
+    /** How many of the three inspections are gone. */
+    private int ladyUses;
+    /** Seats that have used the Lady; the rule says they can never be examined themselves. */
+    private int ladySpentMask;
+    /** Ticks before a bot Lady holder makes its choice. */
+    private int ladyDelay;
+    /** The seat examined by the last Angel use, public. */
+    private int ladyLastTarget = -1;
+    /** How long the reveal card owns the table before the next proposal opens. See {@link #ladyRevealTicks}. */
+    private static final int LADY_REVEAL_TICKS = 120;
+    /**
+     * Ticks the reveal card is on screen. While this counts down the phase stays {@code LADY}, but no
+     * holder may act ({@code SYNC_LADY_ACTIVE} is suppressed); when it reaches zero the next proposal
+     * opens. 120 ticks is the client's 5.6 s card with a little room on top.
+     */
+    private int ladyRevealTicks;
+    /** The seat forced to play its quest card face up, or {@code -1}. */
+    private int spotlightSeat = -1;
+    /** The seat whose quest card was played face up this quest, or {@code -1}. */
+    private int openCardSeat = -1;
+    /** The seat holding the Royal Sword, or {@code -1}. */
+    private int swordHolder = -1;
+    /** Ticks before a bot leader gives the sword away. */
+    /** Ticks left in the sword holder's flip window. */
+    private int swingTicks;
+    /** Ticks before a bot holder decides whether to use the sword. */
+    private int swingBotDelay;
+    /** Whether the sword was used this quest; the holder gets one decision. */
+    private boolean swordUsed;
+    /** Per seat, ticks before a bot tries its plot cards during a proposal / quest. */
+    private int[] plotUseDelay = new int[0];
+    private boolean[] plotUseTried = new boolean[0];
+    /** Per viewer: the last loyalty reveal that viewer was shown. */
+    private final int[] revealSeatFor = new int[MAX_SEATS];
+    private final int[] revealFactionFor = new int[MAX_SEATS];
+    private final int[] revealStampFor = new int[MAX_SEATS];
+    private int revealSerial;
+
+    // ---------------------------------------------------------------------------------------------
+    // Optional module: the two Lancelots
+    // ---------------------------------------------------------------------------------------------
+
+    /** The good wolf's seat, or {@code -1} when the rule is off or the setup had no plain loyalist. */
+    private int lancelotGoodSeat = -1;
+    /** The evil wolf's seat, or {@code -1} when the rule is off or the setup had no plain minion. */
+    private int lancelotEvilSeat = -1;
+    /**
+     * The loyalty deck: three cards that change nothing and two that turn both wolves over. Shuffled once
+     * per game; the top card is turned after the second, third and fourth quests.
+     */
+    private final List<Boolean> loyaltyDeck = new ArrayList<>();
+    /** How many loyalty cards have been turned over so far (at most three). */
+    private int loyaltyDrawn;
+    /** Whether both wolves are on their other side right now. */
+    private boolean lancelotSwapped;
 
     private int winner = SIDE_NONE;
 
@@ -599,8 +846,9 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
         rebuildRoster();
     }
 
+    /** The bots always play at the hard strength: the rule was removed from the options. */
     public AvalonStrength strength() {
-        return AvalonStrength.of(BOT_STRENGTH.get());
+        return AvalonStrength.HARD;
     }
 
     /**
@@ -788,12 +1036,102 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
             return Optional.of(net.minecraft.network.chat.Component.translatable("message.myavalon.seat_count",
                     AvalonRole.MIN_PLAYERS, MAX_SEATS));
         }
+        // A custom identity set is only playable if it still deals the printed good/evil split (and, with
+        // the wolf rule on, still has the two plain seats the wolves take over). Refusing here is what
+        // makes "the setup is unusable" a fact rather than a hint -- the tile and the Play button both
+        // read this predicate.
+        int seats = tableSize();
+        if (AvalonRole.isCustom(roleMask())
+                && !AvalonRole.setupMatches(seats, roleMask(), true, LANCELOT.get())) {
+            return Optional.of(net.minecraft.network.chat.Component.translatable(
+                    "roles.myavalon.invalid_start",
+                    AvalonRole.goodCount(seats), AvalonRole.evilCount(seats)));
+        }
         return Optional.empty();
     }
 
     @Override
     public List<GameOption<?>> getOptions() {
-        return List.of(ENABLE_BOTS, SEATS, BOT_STRENGTH, CUNNING_ASSASSIN, ROLES, DESIGNATED_QUESTS);
+        return List.of(ENABLE_BOTS, SEATS, ROLES, DESIGNATED_QUESTS,
+                PLOT_CARDS, LADY_OF_THE_LAKE, EXCALIBUR, LANCELOT, TRACKER);
+    }
+
+    /** Whether this table plays the plot-card optional rule. */
+    public boolean plotCards() {
+        return PLOT_CARDS.get();
+    }
+
+    /** Always on: the rule was folded into the game rather than left as an option. */
+    public boolean cunningAssassin() {
+        return true;
+    }
+
+    /** Whether this table plays the Lady of the Lake optional rule. */
+    public boolean ladyOfTheLake() {
+        return LADY_OF_THE_LAKE.get();
+    }
+
+    /** Whether this table plays the Royal Sword optional rule. */
+    public boolean excalibur() {
+        return EXCALIBUR.get();
+    }
+
+    /** Whether the client shows the compact card tracker. */
+    public boolean tracker() {
+        return TRACKER.get();
+    }
+
+    /** Whether this table plays the Lancelot expansion -- and actually seated a wolf. */
+    public boolean lancelot() {
+        return LANCELOT.get() && (lancelotGoodSeat >= 0 || lancelotEvilSeat >= 0);
+    }
+
+    /** The rule is on, whether or not this particular setup had a plain seat to wolf-ify. */
+    public boolean lancelotOption() {
+        return LANCELOT.get();
+    }
+
+    /** Whether both wolves are on their other side right now. Public: the loyalty draws say so. */
+    public boolean lancelotSwapped() {
+        return lancelotSwapped;
+    }
+
+    /**
+     * The side {@code seat} plays for now -- the dealt faction, except for a wolf, whose side is flipped
+     * by the loyalty deck. Everything that asks "is this seat evil?" about the <em>present</em> state goes
+     * through here; the deal-time questions (what Merlin was shown) still read {@link #roleAt}.
+     */
+    public int currentSide(int seat) {
+        AvalonRole role = roleAt(seat);
+        if (role == null) {
+            return SIDE_NONE;
+        }
+        boolean evil = role.isEvil();
+        if (role == AvalonRole.LANCELOT_GOOD || role == AvalonRole.LANCELOT_EVIL) {
+            evil = lancelotSwapped ? !evil : evil;
+        }
+        return evil ? SIDE_EVIL : SIDE_GOOD;
+    }
+
+    /** Whether {@code seat} is on evil's side right now. */
+    public boolean isEvilNow(int seat) {
+        return currentSide(seat) == SIDE_EVIL;
+    }
+
+    /** Whether {@code seat} is on good's side right now. */
+    public boolean isGoodNow(int seat) {
+        return currentSide(seat) == SIDE_GOOD;
+    }
+
+    /**
+     * Whether loyalty answers are presented as the blue and red loyalty cards.
+     *
+     * <p>Always true whenever a loyalty answer can happen: the card is part of the Lady and the plot
+     * cards, not a rule of its own. A reveal is never shown as a character card, because that would put
+     * Merlin's identity on the table.
+     */
+    public boolean loyaltyCards() {
+        return ladyOfTheLake() || plotCards();
     }
 
     /** Whether this table plays the designated-quest optional rule. */
@@ -863,6 +1201,37 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
         merlinSeat = -1;
         morganaSeat = -1;
         assassinSeat = -1;
+        plotDeck.clear();
+        plotHands.clear();
+        plotDrawn.clear();
+        plotDrawnTo.clear();
+        plotDrawPending = false;
+        plotDelay = 0;
+        strongLeaderUsed = false;
+        vetoTicks = 0;
+        vetoBotDelay = -1;
+        ladyHolder = -1;
+        ladyUses = 0;
+        ladySpentMask = 0;
+        ladyLastTarget = -1;
+        ladyRevealTicks = 0;
+        swordFlipTarget = -1;
+        ladyDelay = 0;
+        spotlightSeat = -1;
+        openCardSeat = -1;
+        swordHolder = -1;
+        swingTicks = 0;
+        swingBotDelay = -1;
+        swordUsed = false;
+        lancelotGoodSeat = -1;
+        lancelotEvilSeat = -1;
+        loyaltyDeck.clear();
+        loyaltyDrawn = 0;
+        lancelotSwapped = false;
+        java.util.Arrays.fill(revealSeatFor, -1);
+        java.util.Arrays.fill(revealFactionFor, 0);
+        java.util.Arrays.fill(revealStampFor, 0);
+        revealSerial = 0;
         phase = Phase.DEALING;
         matchId = ++matchSerial;
 
@@ -870,10 +1239,25 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
             player.resetPlay();
             getPlayerHand(player).clear();
             getCensoredHand(null, player).clear();
+            plotHands.add(new ArrayList<>());
         }
 
         dealRoles();
         leaderSeat = players.isEmpty() ? 0 : random.nextInt(players.size());
+
+        plotUseDelay = new int[players.size()];
+        plotUseTried = new boolean[players.size()];
+        java.util.Arrays.fill(plotUseDelay, -1);
+        plotDrawPending = plotCards();
+        if (plotCards()) {
+            plotDeck.addAll(AvalonPlot.deckFor(players.size()));
+            Collections.shuffle(plotDeck, random);
+        }
+        if (ladyOfTheLake()) {
+            // The printed rule hands the token to the player on the first leader's right. The ring runs
+            // clockwise, so "right" is the seat before the leader in that order.
+            ladyHolder = seatFrom(leaderSeat, -1);
+        }
 
         // The cards each seat holds for the whole game. Scheduled one seat at a time so the table
         // animates the deal instead of filling the fans on the first tick; the hand is sorted as it is
@@ -923,13 +1307,16 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
         }
     }
 
-    /** Queues handing one staged card to a seat, with the draw sound. */
+    /**
+     * Queues handing one staged card to a seat.
+     *
+     * <p>No sound here: a bot has no player to hear it from, so the server-side draw sound went silent
+     * for every bot seat and left holes in the deal's rhythm. The client plays one draw sound per card
+     * that lands in its own animation instead (see {@code AvalonScreen.soundDealLandings}), which sounds
+     * the same for every seat and cannot be split by who happens to be a player.
+     */
     private void dealOne(int owner, int stagingIndex) {
-        scheduledActions.add(() -> {
-            CardPlayer player = playerAt(owner);
-            player.playSound(ModSounds.CARD_DRAW.get());
-            give(player, staging.get(stagingIndex));
-        });
+        scheduledActions.add(() -> give(playerAt(owner), staging.get(stagingIndex)));
     }
 
     private void missionsReset() {
@@ -950,17 +1337,19 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
      */
     private void dealRoles() {
         List<AvalonRole> composed = new ArrayList<>(AvalonRole.compose(players.size(), roleMask()));
-        if (!CUNNING_ASSASSIN.get()) {
-            composed.remove(AvalonRole.OBERON);
-            while (composed.size() > players.size()) {
-                composed.remove(AvalonRole.LOYALIST);
-            }
-        }
         while (composed.size() < players.size()) {
             composed.add(AvalonRole.LOYALIST);
         }
         while (composed.size() > players.size()) {
             composed.remove(composed.size() - 1);
+        }
+        if (LANCELOT.get()) {
+            // The wolves take over one plain seat each. Deliberately only the plain ones: Percival and
+            // Morgana carry knowledge of their own, and turning one of them into a wolf would quietly
+            // change a different rule. A custom set with no loyalist or no minion simply gets one wolf,
+            // or none -- the option is then announced as unused rather than padded with a role nobody chose.
+            replaceRole(composed, AvalonRole.LOYALIST, AvalonRole.LANCELOT_GOOD);
+            replaceRole(composed, AvalonRole.MINION, AvalonRole.LANCELOT_EVIL);
         }
         Collections.shuffle(composed, random);
         roles.addAll(composed);
@@ -969,16 +1358,36 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
                 case MERLIN -> merlinSeat = i;
                 case MORGANA -> morganaSeat = i;
                 case ASSASSIN -> assassinSeat = i;
+                case LANCELOT_GOOD -> lancelotGoodSeat = i;
+                case LANCELOT_EVIL -> lancelotEvilSeat = i;
                 default -> {
                 }
             }
         }
+        if (lancelot()) {
+            // Three cards that change nothing and two that switch both wolves: shuffled, then read one at
+            // a time after the second, third and fourth quests.
+            loyaltyDeck.add(false);
+            loyaltyDeck.add(false);
+            loyaltyDeck.add(false);
+            loyaltyDeck.add(true);
+            loyaltyDeck.add(true);
+            Collections.shuffle(loyaltyDeck, random);
+        }
         // The roster the opening curtain names. Counts, not seats: this is public setup information.
-        roleCensus = 0;
+        roleCensus = 0L;
         for (AvalonRole role : roles) {
             int shift = role.ordinal() * 4;
-            int count = ((roleCensus >>> shift) & 0xF) + 1;
-            roleCensus = (roleCensus & ~(0xF << shift)) | (Math.min(0xF, count) << shift);
+            long count = ((roleCensus >>> shift) & 0xFL) + 1;
+            roleCensus = (roleCensus & ~(0xFL << shift)) | (Math.min(0xFL, count) << shift);
+        }
+    }
+
+    /** Swaps the first {@code from} in {@code roles} for {@code to}; a no-op when it is not there. */
+    private static void replaceRole(List<AvalonRole> roles, AvalonRole from, AvalonRole to) {
+        int at = roles.indexOf(from);
+        if (at >= 0) {
+            roles.set(at, to);
         }
     }
 
@@ -1017,15 +1426,67 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
             return;
         }
         super.tick();
-        // Charta drives a bot only on the turn of the single current player (AutoPlayer.tick), and a
-        // simultaneous vote has no such thing -- every seat is asked at once. So the bot half of a vote
-        // round is advanced here, each seat on its own countdown; a real seat answers with its own click
-        // and is simply skipped.
-        if (isGameReady && !isGameOver && phase == Phase.VOTE) {
-            tickVoters();
+        if (!isGameReady || isGameOver) {
+            return;
         }
-        if (isGameReady && !isGameOver && phase == Phase.QUEST) {
-            tickQuesters();
+        switch (phase) {
+            case PLOTS -> {
+                if (isBot(playerAt(leaderSeat))) {
+                    if (plotDelay > 0) {
+                        plotDelay--;
+                    } else if (plotDelay == 0) {
+                        plotDelay = -1;
+                        botDistributePlots();
+                    }
+                }
+            }
+            case LADY -> tickLady();
+            case VETO -> tickVeto();
+            case SWING -> tickSwing();
+            case VOTE -> tickVoters();
+            case QUEST -> {
+                // Plot cards first: a peek may read the cards that are already down, and a spotlight has
+                // to be declared before the last card lands. The quest drivers run afterwards.
+                tickPlotBots();
+                tickQuesters();
+            }
+            case PROPOSE -> tickPlotBots();
+            default -> {
+            }
+        }
+    }
+
+    /**
+     * Lets one bot holder play a plot card once its beat has run out.
+     *
+     * <p>Only bots that still hold something are armed (see {@link #armPlotBots}); a seat gets exactly
+     * one attempt per window, so a bot cannot spend a whole hand on the same proposal.
+     */
+    private void tickPlotBots() {
+        if (!plotCards() || plotHands.isEmpty()) {
+            return;
+        }
+        for (int seat = 0; seat < players.size() && seat < plotUseDelay.length; seat++) {
+            if (plotUseTried[seat] || !isBot(playerAt(seat))
+                    || seat >= plotHands.size() || plotHands.get(seat).isEmpty()) {
+                continue;
+            }
+            if (plotUseDelay[seat] > 0) {
+                plotUseDelay[seat]--;
+                continue;
+            }
+            int action = AvalonBots.choosePlotUse(this, seat);
+            if (action >= 0) {
+                plotUseTried[seat] = true;
+                int code = action - PLOT_USE_BASE;
+                int target = code & 0xF;
+                usePlot(seat, AvalonPlot.at(code >>> 4), target == NO_TARGET ? -1 : target);
+                // The play may have changed the phase (a takeover) or ended the game; the next tick
+                // picks the new phase up from scratch.
+                return;
+            }
+            // Nothing legal yet (a peek before any card is down, a steal with nobody holding one):
+            // the beat is over but the attempt is not, so the next tick looks again.
         }
     }
 
@@ -1050,7 +1511,8 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
                 // Nothing to arm: the round was opened for the whole table the moment the team was
                 // confirmed, and `awaiting` keeps this method out until it resolves.
             }
-            case OVER -> {
+            // The optional modules are driven by their own click actions and timers, not by a turn.
+            case OVER, PLOTS, LADY, VETO, SWORD, SWING -> {
             }
         }
     }
@@ -1060,15 +1522,30 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
     // ---------------------------------------------------------------------------------------------
 
     private void beginProposal() {
+        // A rejected team re-enters here, and it must not draw again: the plot cards belong to the quest
+        // round, not to the proposal. `plotDrawPending` is armed once when a quest resolves.
+        if (plotDrawPending && plotCards()) {
+            beginPlotDistribution();
+            return;
+        }
+        beginProposalNow();
+    }
+
+    private void beginProposalNow() {
         phase = Phase.PROPOSE;
         pendingMask = 0;
         teamMask = 0;
+        strongLeaderUsed = false;
+        // A fresh team means a fresh sword: the rejected proposal's bearer (if any) is gone with it.
+        swordHolder = -1;
+        swordUsed = false;
+        swordAim = -1;
+        openCardSeat = -1;
+        armPlotBots();
         if (designatedQuests()) {
             // The previous quest is done and the next slot has not been named by this leader yet. A
             // rejected proposal starts here too, which is the rule: every attempt names its own quest.
             quest = -1;
-            MyAvalonMod.LOGGER.info("designated proposal: leader={} open={} missions={}",
-                    leaderSeat, Integer.toBinaryString(openQuestMask()), java.util.Arrays.toString(missions));
         }
         setCurrentPlayer(leaderSeat);
         table(designatedQuests()
@@ -1077,6 +1554,358 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
                 : net.minecraft.network.chat.Component.translatable("message.myavalon.proposal_started", quest + 1,
                         playerAt(leaderSeat).getColoredName(), teamSize()));
         awaitAction();
+    }
+
+    /** Gives every bot holder a short, staggered beat before it considers its plot cards. */
+    private void armPlotBots() {
+        if (plotUseDelay.length != players.size()) {
+            plotUseDelay = new int[players.size()];
+            plotUseTried = new boolean[players.size()];
+        }
+        java.util.Arrays.fill(plotUseTried, false);
+        for (int seat = 0; seat < players.size(); seat++) {
+            plotUseDelay[seat] = isBot(playerAt(seat)) && !plotHands.isEmpty()
+                    && seat < plotHands.size() && !plotHands.get(seat).isEmpty()
+                    ? 20 + random.nextInt(40) : -1;
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Plot cards
+    // ---------------------------------------------------------------------------------------------
+
+    /** Encodes a plot-card play in the one int the action payload carries. */
+    public static int plotUseAction(AvalonPlot card, int target) {
+        return PLOT_USE_BASE + card.ordinal() * 16 + (target < 0 ? NO_TARGET : target);
+    }
+
+    /** Encodes one hand-out in the same way. */
+    public static int plotGiveAction(AvalonPlot card, int target) {
+        return PLOT_GIVE_BASE + card.ordinal() * 16 + target;
+    }
+
+    /** Encodes a Lady inspection; {@code -1} is the skip. */
+    public static int ladyAction(int target) {
+        return target < 0 ? LADY_SKIP : LADY_BASE + target;
+    }
+
+    /** One round's draw and distribution. The leader must give every card to a different other seat. */
+    private void beginPlotDistribution() {
+        plotDrawPending = false;
+        plotDrawn.clear();
+        plotDrawnTo.clear();
+        int draw = AvalonPlot.drawCount(players.size());
+        for (int i = 0; i < draw && !plotDeck.isEmpty(); i++) {
+            AvalonPlot card = plotDeck.remove(0);
+            if (card == AvalonPlot.ESTABLISH_CONFIDENCE) {
+                // The one card that names the leader: it is the leader who has to show a loyalty card, so
+                // it stays in their hand instead of joining the hand-out row. It counts as one of the
+                // round's drawn cards, which is why the loop does not draw a replacement.
+                plotHands.get(leaderSeat).add(card);
+                table(net.minecraft.network.chat.Component.translatable("message.myavalon.plot_kept",
+                        playerAt(leaderSeat).getColoredName(),
+                        net.minecraft.network.chat.Component.translatable(card.getTranslationKey())));
+                continue;
+            }
+            plotDrawn.add(card);
+            plotDrawnTo.add(-1);
+        }
+        if (plotDrawn.isEmpty()) {
+            beginProposalNow();
+            return;
+        }
+        phase = Phase.PLOTS;
+        pendingMask = 0;
+        teamMask = 0;
+        setCurrentPlayer(leaderSeat);
+        plotDelay = 30;
+        table(net.minecraft.network.chat.Component.translatable("message.myavalon.plot_dealt",
+                playerAt(leaderSeat).getColoredName(), plotDrawn.size()));
+    }
+
+    /**
+     * One hand-out from the leader.
+     *
+     * <p>Every recipient in a batch must be different, which is the printed rule and also what keeps a
+     * three-card draw from turning into one player's private arsenal. A card still waiting in
+     * {@link #plotDrawn} is matched by kind, not by index, because the payload has room for the kind and
+     * the two copies of a kind are interchangeable anyway.
+     */
+    private void handlePlotGive(int from, int action) {
+        if (phase != Phase.PLOTS || from != leaderSeat) {
+            return;
+        }
+        int code = action - PLOT_GIVE_BASE;
+        int ordinal = code >>> 4;
+        int seat = code & 0xF;
+        AvalonPlot card = AvalonPlot.at(ordinal);
+        if (card == null || seat < 0 || seat >= players.size() || seat == leaderSeat) {
+            return;
+        }
+        if (plotDrawnTo.contains(seat)) {
+            return;
+        }
+        int waiting = -1;
+        for (int i = 0; i < plotDrawn.size(); i++) {
+            if (plotDrawnTo.get(i) < 0 && plotDrawn.get(i) == card) {
+                waiting = i;
+                break;
+            }
+        }
+        if (waiting < 0) {
+            return;
+        }
+        plotDrawnTo.set(waiting, seat);
+        table(net.minecraft.network.chat.Component.translatable("message.myavalon.plot_given",
+                playerAt(leaderSeat).getColoredName(),
+                net.minecraft.network.chat.Component.translatable(card.getTranslationKey()),
+                playerAt(seat).getColoredName()));
+        if (!plotDrawnTo.contains(-1)) {
+            for (int i = 0; i < plotDrawn.size(); i++) {
+                plotHands.get(plotDrawnTo.get(i)).add(plotDrawn.get(i));
+            }
+            plotDrawn.clear();
+            plotDrawnTo.clear();
+            beginProposalNow();
+        }
+    }
+
+    /** The leader's own hand-out pass, for a bot leader: every card to a different random other seat. */
+    private void botDistributePlots() {
+        List<Integer> recipients = AvalonBots.choosePlotRecipients(this, leaderSeat);
+        for (int i = 0; i < plotDrawn.size() && i < recipients.size(); i++) {
+            int seat = recipients.get(i);
+            if (seat < 0 || seat >= players.size() || seat == leaderSeat) {
+                continue;
+            }
+            plotDrawnTo.set(i, seat);
+            table(net.minecraft.network.chat.Component.translatable("message.myavalon.plot_given",
+                    playerAt(leaderSeat).getColoredName(),
+                    net.minecraft.network.chat.Component.translatable(plotDrawn.get(i).getTranslationKey()),
+                    playerAt(seat).getColoredName()));
+        }
+        for (int i = 0; i < plotDrawn.size(); i++) {
+            if (plotDrawnTo.get(i) >= 0) {
+                plotHands.get(plotDrawnTo.get(i)).add(plotDrawn.get(i));
+            }
+        }
+        plotDrawn.clear();
+        plotDrawnTo.clear();
+        beginProposalNow();
+    }
+
+    /** What {@code seat} holds, as a bitmask over {@link AvalonPlot} ordinals. */
+    public int plotHandMask(int seat) {
+        int mask = 0;
+        if (seat >= 0 && seat < plotHands.size()) {
+            for (AvalonPlot card : plotHands.get(seat)) {
+                mask |= 1 << card.ordinal();
+            }
+        }
+        return mask;
+    }
+
+    /** The held cards whose window is open right now, whether or not a target has been picked. */
+    public int plotUsableMask(int seat) {
+        int mask = 0;
+        if (seat >= 0 && seat < plotHands.size()) {
+            for (AvalonPlot card : plotHands.get(seat)) {
+                if (card.getUse() != AvalonPlot.Use.PASSIVE && hasLegalTarget(seat, card)) {
+                    mask |= 1 << card.ordinal();
+                }
+            }
+        }
+        return mask;
+    }
+
+    /** The held cards of one seat, for the bot side. Do not mutate. */
+    public List<AvalonPlot> plotHand(int seat) {
+        return seat >= 0 && seat < plotHands.size() ? List.copyOf(plotHands.get(seat)) : List.of();
+    }
+
+    /** Whether {@code seat} could play this card at some target right now. */
+    public boolean hasLegalTarget(int seat, AvalonPlot card) {
+        if (!card.needsTarget()) {
+            return canUsePlot(seat, card, -1);
+        }
+        for (int target = 0; target < players.size(); target++) {
+            if (canUsePlot(seat, card, target)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether {@code seat} may play {@code card} right now, optionally at {@code target}.
+     *
+     * <p>A {@code -1} target means "am I allowed to pick one at all", which is what the hand strip and
+     * the bots use to light a card up before a seat has been chosen.
+     */
+    public boolean canUsePlot(int seat, AvalonPlot card, int target) {
+        if (card == null || seat < 0 || seat >= players.size() || seat >= plotHands.size()
+                || !plotHands.get(seat).contains(card)) {
+            return false;
+        }
+        if (target < -1 || target >= players.size()) {
+            return false;
+        }
+        boolean any = target < 0;
+        return switch (card.getUse()) {
+            case PASSIVE -> false;
+            case TAKE_LEAD -> phase == Phase.PROPOSE && seat != leaderSeat && !strongLeaderUsed;
+            case VETO -> phase == Phase.VETO;
+            case PEEK -> phase == Phase.QUEST && !any && (teamMask & (1 << target)) != 0
+                    && quested.contains(target);
+            case SPOTLIGHT -> phase == Phase.QUEST && !any && spotlightSeat < 0 && quested.isEmpty()
+                    && (teamMask & (1 << target)) != 0 && !quested.contains(target);
+            case STEAL -> (phase == Phase.PROPOSE || phase == Phase.PLOTS) && !any
+                    && target != seat && !plotHands.get(target).isEmpty();
+            case SHOW_SELF -> (phase == Phase.PROPOSE || phase == Phase.PLOTS) && !any && target != seat;
+            case NEIGHBOUR -> (phase == Phase.PROPOSE || phase == Phase.PLOTS) && !any
+                    && target != seat && isNeighbour(seat, target);
+        };
+    }
+
+    private boolean isNeighbour(int seat, int other) {
+        return players.size() > 2 && (seatFrom(seat, 1) == other || seatFrom(seat, -1) == other);
+    }
+
+    /** Applies one plot-card play. The caller has already validated the action. */
+    private void usePlot(int seat, AvalonPlot card, int target) {
+        if (!canUsePlot(seat, card, target)) {
+            return;
+        }
+        removePlot(seat, card);
+        switch (card.getUse()) {
+            case TAKE_LEAD -> {
+                strongLeaderUsed = true;
+                leaderSeat = seat;
+                pendingMask = 0;
+                teamMask = 0;
+                if (designatedQuests()) {
+                    quest = -1;
+                }
+                setCurrentPlayer(seat);
+                table(net.minecraft.network.chat.Component.translatable("message.myavalon.plot_take_lead",
+                        playerAt(seat).getColoredName()));
+                // Retire the old leader's registration before arming the new one.
+                turnToken++;
+                awaiting = false;
+                awaitAction();
+            }
+            case VETO -> {
+                table(net.minecraft.network.chat.Component.translatable("message.myavalon.plot_veto",
+                        playerAt(seat).getColoredName()));
+                vetoTicks = 0;
+                rejects++;
+                if (rejects >= MAX_REJECTS) {
+                    endedByRedAct = true;
+                    finish(SIDE_EVIL, "message.myavalon.evil_by_rejects");
+                    return;
+                }
+                leaderSeat = seatFrom(leaderSeat, 1);
+                beginProposalNow();
+            }
+            case STEAL -> {
+                List<AvalonPlot> stolen = plotHands.get(target);
+                AvalonPlot taken = stolen.remove(random.nextInt(stolen.size()));
+                plotHands.get(seat).add(taken);
+                table(net.minecraft.network.chat.Component.translatable("message.myavalon.plot_steal",
+                        playerAt(seat).getColoredName(), playerAt(target).getColoredName(),
+                        net.minecraft.network.chat.Component.translatable(taken.getTranslationKey())));
+            }
+            case SHOW_SELF -> {
+                revealFactionTo(target, seat);
+                table(net.minecraft.network.chat.Component.translatable("message.myavalon.plot_show",
+                        playerAt(seat).getColoredName(), playerAt(target).getColoredName()));
+            }
+            case NEIGHBOUR -> {
+                revealFactionTo(seat, target);
+                table(net.minecraft.network.chat.Component.translatable("message.myavalon.plot_overheard",
+                        playerAt(seat).getColoredName(), playerAt(target).getColoredName()));
+            }
+            case PEEK -> {
+                Card played = questCards.get(target);
+                if (played != null) {
+                    tell(seat, net.minecraft.network.chat.Component.translatable("message.myavalon.plot_peek",
+                            playerAt(target).getColoredName(),
+                            net.minecraft.network.chat.Component.translatable(AvalonCards.isSuccess(played)
+                                    ? "card.myavalon.quest_success" : "card.myavalon.quest_fail")));
+                }
+                table(net.minecraft.network.chat.Component.translatable("message.myavalon.plot_peek_used",
+                        playerAt(seat).getColoredName(), playerAt(target).getColoredName()));
+            }
+            case SPOTLIGHT -> {
+                spotlightSeat = target;
+                table(net.minecraft.network.chat.Component.translatable("message.myavalon.plot_spotlight",
+                        playerAt(seat).getColoredName(), playerAt(target).getColoredName()));
+            }
+            default -> {
+            }
+        }
+    }
+
+    private void removePlot(int seat, AvalonPlot card) {
+        if (seat >= 0 && seat < plotHands.size()) {
+            plotHands.get(seat).remove(card);
+        }
+    }
+
+    /** Whether any seat holds this kind -- used to decide whether a window is worth opening. */
+    private boolean anyPlotHeld(AvalonPlot card) {
+        for (List<AvalonPlot> hand : plotHands) {
+            if (hand.contains(card)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether at least one holder of this kind is a real player, i.e. needs a window to answer in. */
+    private boolean anyHumanPlots(AvalonPlot card) {
+        for (int seat = 0; seat < plotHands.size(); seat++) {
+            if (plotHands.get(seat).contains(card) && !isBot(playerAt(seat))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Shows {@code subject}'s faction to {@code viewer} and mirrors it for the client's toast.
+     *
+     * <p>This is the one place the plot cards and the Lady meet the loyalty cards: the message and the
+     * card art are chosen by the loyalty rule, while the fact -- good or evil -- is the same either way.
+     */
+    private void revealFactionTo(int viewer, int subject) {
+        AvalonRole role = roleAt(subject);
+        if (viewer < 0 || viewer >= players.size() || role == null) {
+            return;
+        }
+        // What is revealed is loyalty as it stands, not as it was dealt: an inspection of a turned wolf
+        // must say what that seat is playing for now, or the Lady would hand out a lie.
+        boolean evil = isEvilNow(subject);
+        revealSeatFor[viewer] = subject;
+        revealFactionFor[viewer] = evil ? SIDE_EVIL : SIDE_GOOD;
+        revealStampFor[viewer] = ++revealSerial;
+        tell(viewer, net.minecraft.network.chat.Component.translatable(loyaltyCards()
+                        ? "message.myavalon.loyalty_seen" : "message.myavalon.plot_seen",
+                playerAt(subject).getName(),
+                net.minecraft.network.chat.Component.translatable(
+                                evil ? "faction.myavalon.evil" : "faction.myavalon.good")
+                        .withStyle(style -> style.withColor(
+                                evil ? AvalonRole.EVIL_TEXT : AvalonRole.GOOD_TEXT))));
+    }
+
+    /** One private system line to one seat; does nothing for a bot or a vanished entity. */
+    private void tell(int seat, net.minecraft.network.chat.Component message) {
+        if (seat < 0 || seat >= players.size()) {
+            return;
+        }
+        if (playerAt(seat).getEntity() instanceof ServerPlayer serverPlayer) {
+            serverPlayer.sendSystemMessage(message);
+        }
     }
 
     /** The acting seat either proposes a team or picks the assassination target. */
@@ -1088,6 +1917,11 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
         }
         long token = ++turnToken;
         awaiting = true;
+        // Drop any play the seat's own driver completed while the table was in a phase that does not ask
+        // for one. Charta's AutoPlayer answers every tick it is the current player, and during the plot
+        // and Lady windows that answer is a bare null; without this reset the completed future would fire
+        // the new registration at once and a bot would hand in an empty play.
+        actor.resetPlay();
         actor.afterPlay(play -> {
             if (staleCallback(token)) {
                 return;
@@ -1104,23 +1938,74 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
 
     /** A menu click or a screen button: toggles a seat, picks a target, or confirms. */
     public void submitAction(CardPlayer player, int action) {
-        if (isGameOver || !awaiting || player != currentPlayer) {
+        if (isGameOver) {
             return;
         }
         int from = getSeat(player);
         if (from < 0) {
             return;
         }
+        // The optional modules answer in their own action blocks and do not need the turn machinery:
+        // a plot card can be played while somebody else is still building a team.
+        if (action >= LADY_BASE) {
+            handleLady(from, action);
+            return;
+        }
+        if (action >= PLOT_USE_BASE) {
+            int code = action - PLOT_USE_BASE;
+            int target = code & 0xF;
+            usePlot(from, AvalonPlot.at(code >>> 4), target == NO_TARGET ? -1 : target);
+            return;
+        }
+        if (action >= PLOT_GIVE_BASE) {
+            handlePlotGive(from, action);
+            return;
+        }
+        if (action == SWORD_RETRIEVE) {
+            retrieveSword(from);
+            return;
+        }
+        if (action == SWORD_AIM_CLEAR) {
+            clearSwordAim(from);
+            return;
+        }
+        if (action >= SWORD_AIM_BASE && action < SWORD_AIM_BASE + MAX_SEATS) {
+            aimSword(from, action - SWORD_AIM_BASE);
+            return;
+        }
+        if (action >= SWORD_STRIKE_BASE) {
+            if (action == SWORD_PASS) {
+                if (phase == Phase.SWING && from == swordHolder) {
+                    finishSwing();
+                }
+            } else {
+                useSword(from, action - SWORD_STRIKE_BASE);
+            }
+            return;
+        }
+        if (action >= SWORD_ASSIGN_BASE && action < SWORD_ASSIGN_BASE + MAX_SEATS) {
+            // The sword is given during the proposal now; the old hand-out window is kept for saves that
+            // still run it, and the phase decides which reading applies. This used to route every
+            // assignment to the hand-out window, which is what swallowed the proposal-time give.
+            assignSword(from, action - SWORD_ASSIGN_BASE);
+            return;
+        }
+        if (!awaiting || player != currentPlayer) {
+            return;
+        }
         if (phase == Phase.PROPOSE && from == leaderSeat) {
             if (designatedQuests() && action >= PICK_BASE && action < PICK_BASE + AvalonRole.QUESTS) {
                 int picked = action - PICK_BASE;
-                MyAvalonMod.LOGGER.info("quest pick {} from seat {}: open={} accepted={}", picked + 1, from,
-                        Integer.toBinaryString(openQuestMask()), isQuestOpen(picked));
                 selectQuest(picked, picked != quest);
             } else if (action >= TOGGLE_BASE && action < TOGGLE_BASE + MAX_SEATS) {
                 int target = action - TOGGLE_BASE;
                 if (target < players.size()) {
                     pendingMask ^= 1 << target;
+                    // Taking the bearer out of the team takes the sword back with them; leaving it on a
+                    // seat that is no longer picked would show a badge the rule cannot honour.
+                    if (swordHolder >= 0 && (pendingMask & (1 << swordHolder)) == 0) {
+                        swordHolder = -1;
+                    }
                 }
             } else if (action == CONFIRM && hasQuest() && Integer.bitCount(pendingMask) == teamSize()) {
                 player.play(new GamePlay(List.of(), pendingMask));
@@ -1167,16 +2052,236 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
         }
         pendingMask = teamMask;
         countCleanTeam();
-        phase = Phase.VOTE;
-        voted.clear();
-        yesVotes = 0;
-        voteCards.clear();
         table(designatedQuests()
                 ? net.minecraft.network.chat.Component.translatable("message.myavalon.team_proposed_designated",
                         quest + 1, playerAt(leaderSeat).getColoredName(), namesOf(teamMask))
                 : net.minecraft.network.chat.Component.translatable("message.myavalon.team_proposed",
                         namesOf(teamMask), playerAt(leaderSeat).getColoredName()));
+        // The King's Sword is handed out during the proposal, not after it -- so by the time the team is
+        // sealed the bearer is already known. A leader who confirmed without giving it is refused here
+        // (the client greys the button, but the server is what decides); a bot leader picks on its own.
+        if (excalibur() && (swordHolder < 0 || (teamMask & (1 << swordHolder)) == 0)) {
+            if (!isBot(playerAt(leaderSeat))) {
+                return;
+            }
+            int pick = AvalonBots.chooseSwordHolder(this, leaderSeat);
+            if (pick < 0 || (teamMask & (1 << pick)) == 0) {
+                return;
+            }
+            swordHolder = pick;
+            table(net.minecraft.network.chat.Component.translatable("message.myavalon.sword_given",
+                    playerAt(leaderSeat).getColoredName(), playerAt(pick).getColoredName()));
+        }
+        startVote();
+    }
+
+    /**
+     * One sword assignment during a proposal: the leader names a picked seat that will carry the sword.
+     *
+     * <p>Same validation the hand-out window used, only against the live team instead of the sealed one,
+     * so the leader can move the sword as often as the team changes before Confirm.
+     */
+    private void assignSword(int from, int seat) {
+        if (!excalibur() || phase != Phase.PROPOSE || from != leaderSeat) {
+            return;
+        }
+        if (seat < 0 || seat >= players.size() || seat == leaderSeat
+                || (pendingMask & (1 << seat)) == 0) {
+            return;
+        }
+        if (swordHolder == seat) {
+            return;
+        }
+        swordHolder = seat;
+        table(net.minecraft.network.chat.Component.translatable("message.myavalon.sword_given",
+                playerAt(leaderSeat).getColoredName(), playerAt(seat).getColoredName()));
+    }
+
+    /** The vote half of {@link #confirmTeam}, shared by the plain and the sword-bearing paths. */
+    private void startVote() {
+        phase = Phase.VOTE;
+        voted.clear();
+        yesVotes = 0;
+        voteCards.clear();
         beginVoting();
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The Royal Sword
+    // ---------------------------------------------------------------------------------------------
+
+    /** Seats the leader may give the sword to: the team, minus the leader's own chair. */
+    public int swordEligibleMask() {
+        if (leaderSeat < 0 || leaderSeat >= players.size()) {
+            return 0;
+        }
+        return teamMask & ~(1 << leaderSeat) & ((1 << players.size()) - 1);
+    }
+
+    /**
+     * Opens the hand-out window.
+     *
+     * <p>The leader has to pick somebody on the team; the rule forbids keeping the sword for oneself.
+     * It is a separate phase rather than a flag inside PROPOSE because the team is already sealed at this
+     * point -- the leader is no longer picking players, only a bearer.
+     */
+    /**
+     * The leader picks the placed sword back up. The rule wants the leader to hand it to somebody else
+     * before Confirm, so a misplaced sword must be movable -- picking it up clears the bearer and the
+     * client then carries the card again.
+     */
+    private void retrieveSword(int from) {
+        if (!excalibur() || phase != Phase.PROPOSE || from != leaderSeat || swordHolder < 0) {
+            return;
+        }
+        swordHolder = -1;
+        table(net.minecraft.network.chat.Component.translatable("message.myavalon.sword_taken",
+                playerAt(leaderSeat).getColoredName()));
+    }
+
+    /** Seats the sword holder may flip: the team, minus the holder and any card played face up. */
+    public int swordTargetMask() {
+        int mask = teamMask;
+        if (swordHolder >= 0 && swordHolder < players.size()) {
+            mask &= ~(1 << swordHolder);
+        }
+        if (openCardSeat >= 0 && openCardSeat < players.size()) {
+            mask &= ~(1 << openCardSeat);
+        }
+        // A seat that answered with no card at all has nothing to turn over.
+        for (int seat = 0; seat < players.size(); seat++) {
+            if (questCards.get(seat) == null) {
+                mask &= ~(1 << seat);
+            }
+        }
+        return mask & ((1 << players.size()) - 1);
+    }
+
+    /** Opens the holder's flip window after the last quest card has landed. */
+    private void beginSwing() {
+        if (swordHolder < 0 || swordHolder >= players.size() || swordTargetMask() == 0) {
+            finishSwing();
+            return;
+        }
+        phase = Phase.SWING;
+        swordUsed = false;
+        // A person may take as long as they like with the sword -- the choice is theirs and the table
+        // waits; the skip button exists for passing, not a clock. The bot keeps a short beat so it does
+        // not hold the table while "thinking".
+        swingTicks = isBot(playerAt(swordHolder)) ? 20 : -1;
+        swingBotDelay = 10;
+        setCurrentPlayer(swordHolder);
+        table(net.minecraft.network.chat.Component.translatable("message.myavalon.sword_ready",
+                playerAt(swordHolder).getColoredName()));
+    }
+
+    /** Closes the window, announces a pass, and resolves the quest with whatever the pile now holds. */
+    private void finishSwing() {
+        swordAim = -1;
+        if (!swordUsed && swordHolder >= 0 && swordHolder < players.size()) {
+            table(net.minecraft.network.chat.Component.translatable("message.myavalon.sword_pass",
+                    playerAt(swordHolder).getColoredName()));
+        }
+        phase = Phase.QUEST;
+        resolveQuest();
+    }
+
+    private void tickSwing() {
+        if (swingTicks > 0) {
+            swingTicks--;
+        }
+        if (swingBotDelay > 0) {
+            swingBotDelay--;
+        } else if (swingBotDelay == 0) {
+            swingBotDelay = -1;
+            if (isBot(playerAt(swordHolder))) {
+                int target = AvalonBots.chooseSwordTarget(this, swordHolder);
+                if (target >= 0) {
+                    useSword(swordHolder, target);
+                    return;
+                }
+                finishSwing();
+                return;
+            }
+        }
+        if (phase == Phase.SWING && swingTicks == 0) {
+            // Only a bot's beat ever reaches zero; a human's is -1 and waits for their click.
+            finishSwing();
+        }
+    }
+
+    /** The holder points the sword at a seat while looking at its card; public, and nothing is flipped. */
+    private void aimSword(int from, int seat) {
+        if (phase != Phase.SWING || from != swordHolder || swordHolder < 0) {
+            return;
+        }
+        if (seat < 0 || seat >= players.size() || (swordTargetMask() & (1 << seat)) == 0) {
+            return;
+        }
+        swordAim = seat;
+    }
+
+    /** The holder backs out of a look: the aim is withdrawn and the table reads the plain wait line. */
+    private void clearSwordAim(int from) {
+        if (phase != Phase.SWING || from != swordHolder) {
+            return;
+        }
+        if (swordAim != -1) {
+            swordAim = -1;
+        }
+    }
+
+    /** One flip: a human holder's click or the bot's choice. */
+    private void useSword(int actor, int target) {
+        if (phase != Phase.SWING || actor != swordHolder || swordHolder < 0
+                || (swordTargetMask() & (1 << target)) == 0) {
+            return;
+        }
+        Card original = questCards.get(target);
+        if (original == null) {
+            return;
+        }
+        boolean wasSuccess = AvalonCards.isSuccess(original);
+        Card flipped = AvalonCards.questCard(!wasSuccess);
+        // The pile is what the reveal draws. questCards keeps the original, because that is the card the
+        // target's hand is owed back after the quest; the flipped copy only lives on the pile.
+        //
+        // The card is flipped by PLAY ORDER, not by value: two members can play the same face, and an
+        // equals() search would then flip whichever of the two came first in the pile -- the wrong
+        // seat's card, and the wrong card for the holder who clicked it.
+        List<Card> cards = pileCards();
+        int at = questPlayOrder.indexOf(target);
+        boolean replaced = false;
+        if (at >= 0 && at < cards.size()) {
+            cards.set(at, flipped);
+            replaced = true;
+        }
+        if (replaced) {
+            pile.setCards(cards);
+        } else {
+            pile.add(flipped);
+        }
+        if (wasSuccess) {
+            questFails++;
+        } else {
+            questFails = Math.max(0, questFails - 1);
+        }
+        swordUsed = true;
+        swordFlipTarget = target;
+        table(net.minecraft.network.chat.Component.translatable("message.myavalon.sword_used",
+                playerAt(swordHolder).getColoredName(), playerAt(target).getColoredName()));
+        tell(swordHolder, net.minecraft.network.chat.Component.translatable("message.myavalon.sword_original",
+                playerAt(target).getColoredName(),
+                net.minecraft.network.chat.Component.translatable(wasSuccess
+                        ? "card.myavalon.quest_success" : "card.myavalon.quest_fail")));
+        // The holder's client has already played the card's turn-over before sending this: the strike
+        // arrives at the end of its animation, so the reveal may start straight away.
+        finishSwing();
+    }
+
+    /** The seat that played the {@code index}-th pile card, as seat + 1, or {@code 0}. */
+    public int questOrderAt(int index) {
+        return index >= 0 && index < questPlayOrder.size() ? questPlayOrder.get(index) + 1 : 0;
     }
 
     /** Credits the leader with a team nobody on it can sabotage -- see {@link #cleanTeams}. */
@@ -1185,7 +2290,7 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
             return;
         }
         for (int seat = 0; seat < players.size(); seat++) {
-            if ((teamMask & (1 << seat)) != 0 && roleAt(seat) != null && roleAt(seat).isEvil()) {
+            if ((teamMask & (1 << seat)) != 0 && isEvilNow(seat)) {
                 return;
             }
         }
@@ -1326,9 +2431,28 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
      */
     private void beginQuest() {
         phase = Phase.QUEST;
+        // An approved team that survives the veto window ends the run. Cleared here rather than at the
+        // vote so a veto can still count as the fifth rejection and hand evil the game.
+        rejects = 0;
         quested.clear();
+        questPlayOrder.clear();
+        swordFlipTarget = -1;
+        swordAim = -1;
         questFails = 0;
         questTeams[quest] = teamMask;
+        spotlightSeat = -1;
+        openCardSeat = -1;
+        swordUsed = false;
+        // A fresh window for the quest-only plot cards (a peek and a forced reveal).
+        armPlotBots();
+        // The spotlight has to be declared before any quest card is down, so a bot holding it gets the
+        // first few ticks of the quest rather than the general twenty-to-sixty beat.
+        for (int seat = 0; seat < players.size() && seat < plotUseDelay.length; seat++) {
+            if (isBot(playerAt(seat)) && seat < plotHands.size()
+                    && plotHands.get(seat).contains(AvalonPlot.IN_THE_SPOTLIGHT)) {
+                plotUseDelay[seat] = random.nextInt(6);
+            }
+        }
         awaitingQuest.clear();
         for (int i = 0; i < players.size(); i++) {
             int member = seatFrom(leaderSeat, i);
@@ -1341,6 +2465,7 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
         awaiting = true;
         long token = ++turnToken;
         for (int member : awaitingQuest) {
+            playerAt(member).resetPlay();
             playerAt(member).afterPlay(play -> castQuestCard(token, member, play));
         }
         questDelay = new int[players.size()];
@@ -1443,6 +2568,9 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
         long token = ++turnToken;
         for (int i = 0; i < players.size(); i++) {
             int voter = i;
+            // Same stale-completion guard as beginQuest: every seat is re-armed for this round, so a
+            // null answer left over from a window that asked nothing must not count as a vote.
+            playerAt(i).resetPlay();
             playerAt(i).afterPlay(play -> castVote(token, voter, play));
         }
         voterDelay = new int[players.size()];
@@ -1506,7 +2634,7 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
     private void tallySharpOpposition() {
         boolean carrying = false;
         for (int seat = 0; seat < players.size(); seat++) {
-            if ((teamMask & (1 << seat)) != 0 && roleAt(seat) != null && roleAt(seat).isEvil()) {
+            if ((teamMask & (1 << seat)) != 0 && isEvilNow(seat)) {
                 carrying = true;
                 break;
             }
@@ -1530,6 +2658,19 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
         if (yes) {
             yesVotes++;
         }
+        // The Opinion Maker's whole effect: its holder's ballot is public from the moment it is cast,
+        // rather than from the tally. Checked before the card leaves the hand's record so a holder who
+        // was dealt the card still shows it this round.
+        if (plotCards() && voter < plotHands.size()
+                && plotHands.get(voter).contains(AvalonPlot.OPINION_MAKER)) {
+            table(card == null
+                    ? net.minecraft.network.chat.Component.translatable("message.myavalon.opinion_abstain",
+                    playerAt(voter).getColoredName())
+                    : net.minecraft.network.chat.Component.translatable("message.myavalon.opinion_vote",
+                    playerAt(voter).getColoredName(),
+                    net.minecraft.network.chat.Component.translatable(
+                            yes ? "card.myavalon.vote_yes" : "card.myavalon.vote_no")));
+        }
         table(net.minecraft.network.chat.Component.translatable(yes ? "message.myavalon.voted_yes" : "message.myavalon.voted_no",
                 playerAt(voter).getColoredName()).withStyle(net.minecraft.ChatFormatting.GRAY));
         if (awaitingVotes.isEmpty()) {
@@ -1542,6 +2683,18 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
         quested.add(member);
         if (card != null) {
             questCards.put(member, card);
+            questPlayOrder.add(member);
+        }
+        // In the Spotlight: this member's card is public the moment it lands. Announced here rather than
+        // at the reveal because the point of the card is the half-second before everybody else's.
+        if (member == spotlightSeat && card != null) {
+            table(net.minecraft.network.chat.Component.translatable("message.myavalon.spotlight_played",
+                    playerAt(member).getColoredName(),
+                    net.minecraft.network.chat.Component.translatable(AvalonCards.isSuccess(card)
+                            ? "card.myavalon.quest_success" : "card.myavalon.quest_fail")));
+            // A card already played face up cannot be turned by the Royal Sword; remember which seat it was.
+            openCardSeat = member;
+            spotlightSeat = -1;
         }
         if (!AvalonCards.isSuccess(card)) {
             // Which includes answering with no card at all: an abstention is a fail, exactly as it was when
@@ -1550,7 +2703,13 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
         }
         if (awaitingQuest.isEmpty()) {
             awaiting = false;
-            resolveQuest();
+            // The sword's flip happens after every card is down and before the reveal; with no sword
+            // (or no bearer) the quest resolves straight away as before.
+            if (excalibur() && swordHolder >= 0) {
+                beginSwing();
+            } else {
+                resolveQuest();
+            }
         }
     }
 
@@ -1583,11 +2742,14 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
                 return;
             }
             if (approved) {
-                // The counter is a run of consecutive rejections, not a game-long budget: an approved
-                // team clears it. Kept cumulative it reads wrong against the "5 in a row" rule and,
-                // worse, an evil leader that good keeps voting down eats the whole budget.
-                rejects = 0;
-                beginQuest();
+                // The run of rejections is only over once the quest actually starts: a No Confidence
+                // veto still counts as a failed vote, and a fifth one hands evil the game. So the
+                // counter is cleared in beginQuest, not here.
+                if (plotCards() && anyPlotHeld(AvalonPlot.NO_CONFIDENCE)) {
+                    beginVeto();
+                } else {
+                    beginQuest();
+                }
                 return;
             }
             if (rejects >= MAX_REJECTS) {
@@ -1599,6 +2761,140 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
             beginProposal();
         };
         lingerTicks = LINGER;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // No Confidence: the beat between an approved vote and the quest
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Opens the veto window.
+     *
+     * <p>Short when only bots hold the card, long enough for a person to read the approved team and
+     * decide. A table where nobody acts simply starts the quest, which is the printed outcome of not
+     * playing the card.
+     */
+    private void beginVeto() {
+        phase = Phase.VETO;
+        vetoTicks = anyHumanPlots(AvalonPlot.NO_CONFIDENCE) ? 200 : 20;
+        vetoBotDelay = 15;
+        table(net.minecraft.network.chat.Component.translatable("message.myavalon.veto_window"));
+    }
+
+    private void tickVeto() {
+        if (vetoTicks > 0) {
+            vetoTicks--;
+        }
+        if (vetoBotDelay > 0) {
+            vetoBotDelay--;
+        } else if (vetoBotDelay == 0) {
+            vetoBotDelay = -1;
+            for (int seat = 0; seat < players.size(); seat++) {
+                if (isBot(playerAt(seat)) && plotHands.get(seat).contains(AvalonPlot.NO_CONFIDENCE)
+                        && AvalonBots.chooseVeto(this, seat)) {
+                    usePlot(seat, AvalonPlot.NO_CONFIDENCE, -1);
+                    return;
+                }
+            }
+        }
+        if (phase == Phase.VETO && vetoTicks <= 0) {
+            beginQuest();
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The Lady of the Lake
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Opens the Lady's window after the second, third or fourth resolved quest.
+     *
+     * <p>The holder is public and so is the act; only the loyalty answered is private. Skipped outright
+     * when every other seat has already used the Lady, which can only happen on a short table.
+     */
+    private void beginLady() {
+        if (ladyTargetMask() == 0) {
+            leaderSeat = seatFrom(leaderSeat, 1);
+            beginProposal();
+            return;
+        }
+        // The Angel's window opens with a clean table: the previous proposal's team markers are put away
+        // here, and the seats the Angel may examine are what the highlight is for from now on.
+        pendingMask = 0;
+        teamMask = 0;
+        phase = Phase.LADY;
+        ladyDelay = 30;
+        setCurrentPlayer(ladyHolder);
+        table(net.minecraft.network.chat.Component.translatable("message.myavalon.lady_awakes",
+                playerAt(ladyHolder).getColoredName()));
+    }
+
+    /** Seats the current Lady holder may examine. */
+    public int ladyTargetMask() {
+        if (ladyHolder < 0 || ladyHolder >= players.size()) {
+            return 0;
+        }
+        int mask = 0;
+        for (int seat = 0; seat < players.size(); seat++) {
+            if (seat != ladyHolder && (ladySpentMask & (1 << seat)) == 0) {
+                mask |= 1 << seat;
+            }
+        }
+        return mask;
+    }
+
+    private void tickLady() {
+        if (ladyRevealTicks > 0) {
+            // The inspection is done and the reveal card is playing for everybody: the next proposal
+            // waits for it, so the table reads the answer before it is asked to draft a team again.
+            if (--ladyRevealTicks == 0) {
+                leaderSeat = seatFrom(leaderSeat, 1);
+                beginProposal();
+            }
+            return;
+        }
+        if (ladyHolder < 0 || !isBot(playerAt(ladyHolder)) || ladyDelay-- > 0) {
+            return;
+        }
+        int target = AvalonBots.chooseLadyTarget(this, ladyHolder);
+        if (target < 0) {
+            // The inspection cannot be skipped, so a bot with no considered target takes the first legal
+            // one rather than leaving the table waiting on a choice it will never make.
+            int mask = ladyTargetMask();
+            target = mask == 0 ? -1 : Integer.numberOfTrailingZeros(mask);
+        }
+        if (target >= 0) {
+            handleLady(ladyHolder, ladyAction(target));
+        }
+    }
+
+    /**
+     * A Lady choice: {@code action} is {@link #ladyAction(int)}. There is no skip -- the rule's whole
+     * point is that the holder must look, and the table knows it. A holder who never answers simply
+     * holds the table (a human), which is the same pressure every turn on this table already carries.
+     */
+    private void handleLady(int from, int action) {
+        if (phase != Phase.LADY || from != ladyHolder || ladyRevealTicks > 0) {
+            return;
+        }
+        if (action == LADY_SKIP) {
+            return; // No skip: the old action code is ignored rather than honoured.
+        }
+        int target = action - LADY_BASE;
+        if (target < 0 || target >= players.size() || (ladyTargetMask() & (1 << target)) == 0) {
+            return;
+        }
+        int holder = ladyHolder;
+        revealFactionTo(holder, target);
+        ladyUses++;
+        ladyLastTarget = target;
+        ladySpentMask |= 1 << holder;
+        ladyHolder = target;
+        table(net.minecraft.network.chat.Component.translatable("message.myavalon.lady_used",
+                playerAt(holder).getColoredName(), playerAt(target).getColoredName()));
+        // Not beginProposal() yet: the reveal card has to fly and turn over first. The countdown lives in
+        // tickLady, and ACTIVE/ELIGIBLE are suppressed while it runs so the new holder cannot act early.
+        ladyRevealTicks = LADY_REVEAL_TICKS;
     }
 
     private void resolveQuest() {
@@ -1627,6 +2923,9 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
                 goodSurvivedTheQuests();
                 return;
             }
+            // The loyalty deck is turned after the second, third and fourth quests -- before the next
+            // leader names anything, so the table knows which side the wolves are on for that round.
+            drawLoyaltyIfDue();
             if (!designatedQuests()) {
                 // Classic play walks the board left to right; the designated rule leaves the pool open
                 // and lets the next leader name whichever slot is still available.
@@ -1638,10 +2937,47 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
                     return;
                 }
             }
+            // A quest round begins here, and this is the only place its plot cards are drawn: a rejected
+            // team re-enters the proposal without a fresh draw.
+            plotDrawPending = plotCards();
+            if (ladyOfTheLake() && ladyUses < 3 && resolvedQuests() >= 2 && resolvedQuests() <= 4) {
+                beginLady();
+                return;
+            }
             leaderSeat = seatFrom(leaderSeat, 1);
             beginProposal();
         };
         lingerTicks = QUEST_LINGER;
+    }
+
+    /**
+     * Turns the next loyalty card over once the board has the right number of quests in it.
+     *
+     * <p>Due after the second, third and fourth quests -- {@code loyaltyDrawn} trails {@code
+     * resolvedQuests} by exactly two, which also makes a repeated call for the same board a no-op. The
+     * card is public: the table is told whether the wolves switched, and only then told which side they
+     * are now on. That is the whole information the module gives anybody who is not a wolf.
+     */
+    private void drawLoyaltyIfDue() {
+        if (!lancelot() || loyaltyDrawn >= loyaltyDeck.size()) {
+            return;
+        }
+        int resolved = resolvedQuests();
+        if (resolved < 2 || resolved > 4 || loyaltyDrawn != resolved - 2) {
+            return;
+        }
+        boolean swap = loyaltyDeck.get(loyaltyDrawn);
+        loyaltyDrawn++;
+        table(net.minecraft.network.chat.Component.translatable(
+                swap ? "message.myavalon.lancelot_switch" : "message.myavalon.lancelot_steady", resolved));
+        if (swap) {
+            lancelotSwapped = !lancelotSwapped;
+            table(net.minecraft.network.chat.Component.translatable("message.myavalon.lancelot_now",
+                    net.minecraft.network.chat.Component.translatable(lancelotSwapped
+                                    ? "faction.myavalon.evil" : "faction.myavalon.good")
+                            .withStyle(style -> style.withColor(lancelotSwapped
+                                    ? AvalonRole.EVIL_TEXT : AvalonRole.GOOD_TEXT))));
+        }
     }
 
     /**
@@ -1663,6 +2999,11 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
 
     private void beginAssassination() {
         phase = Phase.ASSASSIN;
+        // The table stops talking about teams here: the flags and the leader's crown belong to the
+        // proposal, and the one question left is the knife. Clearing the masks takes the flags and the
+        // picked-seat highlight away for everyone at once.
+        pendingMask = 0;
+        teamMask = 0;
         pendingTarget = -1;
         setCurrentPlayer(assassinSeat);
         table(net.minecraft.network.chat.Component.translatable("message.myavalon.assassin_awakes", playerAt(assassinSeat).getColoredName()));
@@ -1788,8 +3129,9 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
         if (!AvalonCards.isQuest(card)) {
             return false;
         }
-        AvalonRole role = roleAt(from);
-        return role == null || !role.isGood() || AvalonCards.isSuccess(card);
+        // The legality test reads the seat's <em>current</em> side: a wolf that has been turned to good may
+        // not sabotage any more, and one turned to evil no longer has to play a success.
+        return currentSide(from) == SIDE_EVIL || AvalonCards.isSuccess(card);
     }
 
     @Override
@@ -1872,7 +3214,8 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
         if (!endedByRedAct) {
             for (int i = 0; i < players.size(); i++) {
                 CardPlayer player = players.get(i);
-                boolean good = roles.get(i).isGood();
+                // A wolf is told which side it finished on, not the side it was dealt.
+                boolean good = isGoodNow(i);
                 boolean won = goodWon == good;
                 net.minecraft.network.chat.Component title = winner == SIDE_NONE
                         // No side won: "evil wins" would be the default branch of the comparison below,
@@ -1883,8 +3226,15 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
                                         ? (good ? "message.myavalon.good_wins" : "message.myavalon.good_wins_evil")
                                         : (good ? "message.myavalon.evil_wins_good" : "message.myavalon.evil_wins"))
                                 .withStyle(won ? net.minecraft.ChatFormatting.GREEN : net.minecraft.ChatFormatting.RED);
-                net.minecraft.network.chat.Component subtitle = net.minecraft.network.chat.Component.translatable("message.myavalon.you_were",
-                        net.minecraft.network.chat.Component.translatable(roles.get(i).getTranslationKey()));
+                net.minecraft.network.chat.Component roleName =
+                        net.minecraft.network.chat.Component.translatable(roles.get(i).getTranslationKey());
+                AvalonRole dealt = roles.get(i);
+                net.minecraft.network.chat.Component subtitle = dealt == AvalonRole.LANCELOT_GOOD
+                        || dealt == AvalonRole.LANCELOT_EVIL
+                        ? net.minecraft.network.chat.Component.translatable("message.myavalon.you_were_now",
+                        roleName, net.minecraft.network.chat.Component.translatable(good
+                                ? "faction.myavalon.good" : "faction.myavalon.evil"))
+                        : net.minecraft.network.chat.Component.translatable("message.myavalon.you_were", roleName);
                 player.sendTitle(title, subtitle);
             }
         }
@@ -1930,9 +3280,8 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
         for (int i = 0; i < players.size() && i < roles.size(); i++) {
             CardPlayer player = players.get(i);
             if (player.getEntity() instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {
-                // The winner is a side; whether this seat won is the side it was dealt compared with it.
-                AvalonStats.record(serverPlayer.getServer(), serverPlayer, roles.get(i),
-                        goodWon == roles.get(i).isGood());
+                // The winner is a side; whether this seat won is the side it finished on compared with it.
+                AvalonStats.record(serverPlayer.getServer(), serverPlayer, roles.get(i), goodWon == isGoodNow(i));
             }
         }
     }
@@ -2043,10 +3392,33 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
         for (int place = 0; place < order.length; place++) {
             int seat = order[place];
             boolean evil = roles.get(seat).isEvil();
-            lines.add(Component.translatable("message.myavalon.summary_rank", place + 1,
-                            names.get(seat), counts[seat])
+            lines.add(Component.translatable("message.myavalon.summary_rank",
+                            padLeft(Integer.toString(place + 1), 2),
+                            padRight(names.get(seat).getString(), 12),
+                            padLeft(Integer.toString(counts[seat]), 2))
                     .withStyle(style -> style.withColor(evil ? SUMMARY_EVIL : SUMMARY_GOOD)));
         }
+    }
+
+    /**
+     * Pads a string on the right so a name column lines up. Widths are counted in display columns: a
+     * CJK glyph is two, anything else one, which is how the vanilla font lays them out.
+     */
+    private static String padRight(String text, int columns) {
+        return text + " ".repeat(Math.max(0, columns - displayColumns(text)));
+    }
+
+    /** Pads a number on the left, so a right-aligned column of counts lines up too. */
+    private static String padLeft(String text, int columns) {
+        return " ".repeat(Math.max(0, columns - displayColumns(text))) + text;
+    }
+
+    private static int displayColumns(String text) {
+        int width = 0;
+        for (int i = 0; i < text.length(); i++) {
+            width += text.charAt(i) > 0x2E80 ? 2 : 1;
+        }
+        return width;
     }
 
     /**
@@ -2210,12 +3582,11 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
         return AvalonRole.needsTwoFails(players.size(), quest) ? 2 : 1;
     }
 
-    /** How many evil seats are on the team currently on the table. */
+    /** How many evil seats are on the team currently on the table, by current side. */
     public int teamEvilCount() {
         int count = 0;
         for (int seat = 0; seat < players.size(); seat++) {
-            AvalonRole role = roleAt(seat);
-            if ((teamMask & (1 << seat)) != 0 && role != null && role.isEvil()) {
+            if ((teamMask & (1 << seat)) != 0 && isEvilNow(seat)) {
                 count++;
             }
         }
@@ -2238,6 +3609,12 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
     @Nullable
     public AvalonRole roleAt(int seat) {
         return seat >= 0 && seat < roles.size() ? roles.get(seat) : null;
+    }
+
+    /** The card {@code seat} played in the running quest, or {@code null}. */
+    @Nullable
+    public Card questCardOf(int seat) {
+        return questCards.get(seat);
     }
 
     /** {@code true} while the viewer is the seat that has to act, and acting means a card. */
@@ -2274,11 +3651,22 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
                     known |= 1 << morganaSeat;
                 }
             }
-            case ASSASSIN, MORGANA, MORDRED, MINION -> {
+            case ASSASSIN, MORGANA, MORDRED, MINION, LANCELOT_EVIL -> {
                 for (int i = 0; i < roles.size(); i++) {
                     if (roles.get(i).isEvil() && roles.get(i) != AvalonRole.OBERON) {
                         known |= 1 << i;
                     }
+                }
+                // The pair knows each other, which is the one piece of information the module hands
+                // out: the evil wolf sees the good one even though it was dealt on the other side.
+                if (role == AvalonRole.LANCELOT_EVIL && lancelotGoodSeat >= 0) {
+                    known |= 1 << lancelotGoodSeat;
+                }
+            }
+            case LANCELOT_GOOD -> {
+                // The good wolf knows only its counterpart -- it does not see the rest of evil.
+                if (lancelotEvilSeat >= 0) {
+                    known |= 1 << lancelotEvilSeat;
                 }
             }
             default -> {
@@ -2331,6 +3719,16 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
 
     /** Value of one mirrored data slot, as seen by {@code viewer}. */
     public int syncValue(int index, @Nullable CardPlayer viewer) {
+        int from = getSeat(viewer);
+        if (index >= SYNC_PLOT_DRAW_BASE && index < SYNC_PLOT_DRAW_BASE + MAX_PLOT_DRAW) {
+            int at = index - SYNC_PLOT_DRAW_BASE;
+            if (phase != Phase.PLOTS || from < 0 || from != leaderSeat || at >= plotDrawn.size()) {
+                return 0;
+            }
+            // Once a card has been handed to somebody it leaves the leader's strip, which is what tells
+            // the screen how many are left to place.
+            return plotDrawnTo.get(at) < 0 ? plotDrawn.get(at).ordinal() + 1 : 0;
+        }
         if (index >= SYNC_MISSION_BASE && index < SYNC_MISSION_BASE + AvalonRole.QUESTS) {
             return missions[index - SYNC_MISSION_BASE];
         }
@@ -2342,7 +3740,6 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
             int at = index - SYNC_ROLE_BASE;
             return phase == Phase.OVER && at < roles.size() ? roles.get(at).ordinal() + 1 : 0;
         }
-        int from = getSeat(viewer);
         return switch (index) {
             case SYNC_PHASE -> phase.ordinal();
             case SYNC_QUEST -> quest;
@@ -2365,10 +3762,41 @@ public class AvalonGame extends Game<AvalonGame, AvalonMenu> {
             case SYNC_NO_VOTERS -> noVoterMask();
             // Masked to 16 bits: the data-slot packet is a short, and a high half with its top bit set
             // would otherwise arrive sign-extended as a negative int.
-            case SYNC_CENSUS -> roleCensus & 0xFFFF;
-            case SYNC_CENSUS_HIGH -> (roleCensus >>> 16) & 0xFFFF;
+            case SYNC_CENSUS -> (int) (roleCensus & 0xFFFF);
+            case SYNC_CENSUS_HIGH -> (int) ((roleCensus >>> 16) & 0xFFFF);
+            case SYNC_CENSUS_TOP -> (int) ((roleCensus >>> 32) & 0xFFFF);
             case SYNC_DESIGNATED -> designatedQuests() ? 1 : 0;
             case SYNC_OPEN_QUESTS -> openQuestMask();
+            case SYNC_PLOT_HAND -> from < 0 ? 0 : plotHandMask(from);
+            case SYNC_PLOT_CAN_USE -> from < 0 ? 0 : plotUsableMask(from);
+            case SYNC_VETO -> phase == Phase.VETO ? 1 : 0;
+            case SYNC_SPOTLIGHT -> spotlightSeat;
+            case SYNC_LADY_HOLDER -> ladyHolder;
+            case SYNC_LADY_USES -> ladyUses;
+            case SYNC_LADY_ACTIVE -> from >= 0 && from == ladyHolder && phase == Phase.LADY
+                    && ladyRevealTicks <= 0 ? 1 : 0;
+            case SYNC_LADY_ELIGIBLE -> from >= 0 && from == ladyHolder && ladyRevealTicks <= 0
+                    ? ladyTargetMask() : 0;
+            case SYNC_REVEAL_SEAT -> from < 0 ? -1 : revealSeatFor[from];
+            case SYNC_REVEAL_FACTION -> from < 0 ? 0 : revealFactionFor[from];
+            case SYNC_REVEAL_STAMP -> from < 0 ? 0 : revealStampFor[from];
+            case SYNC_LOYALTY -> loyaltyCards() ? 1 : 0;
+            case SYNC_SWORD -> swordHolder;
+            case SYNC_SWORD_ELIGIBLE -> phase == Phase.SWING ? swordTargetMask() : 0;
+            case SYNC_LANCELOT -> lancelot() ? 1 : 0;
+            case SYNC_LANCELOT_SWAP -> lancelotSwapped ? 1 : 0;
+            case SYNC_LADY_TARGET -> ladyLastTarget;
+            case SYNC_EXCALIBUR -> excalibur() ? 1 : 0;
+            case SYNC_QUEST_ORDER_BASE -> questOrderAt(0);
+            case SYNC_QUEST_ORDER_BASE + 1 -> questOrderAt(1);
+            case SYNC_QUEST_ORDER_BASE + 2 -> questOrderAt(2);
+            case SYNC_QUEST_ORDER_BASE + 3 -> questOrderAt(3);
+            case SYNC_QUEST_ORDER_BASE + 4 -> questOrderAt(4);
+            case SYNC_TRACKER -> tracker() ? 1 : 0;
+            case SYNC_SWORD_TARGET -> swordFlipTarget;
+            case SYNC_SWORD_AIM -> swordAim;
+            case SYNC_LADY_RULE -> ladyOfTheLake() ? 1 : 0;
+            case SYNC_PLOT_RULE -> plotCards() ? 1 : 0;
             case SYNC_ROLE -> {
                 AvalonRole role = from < 0 ? null : roleAt(from);
                 yield role == null ? 0 : role.ordinal() + 1;

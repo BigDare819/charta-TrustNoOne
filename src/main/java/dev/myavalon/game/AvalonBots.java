@@ -5,6 +5,8 @@ import dev.lucaargolo.charta.common.game.api.GamePlay;
 import dev.lucaargolo.charta.common.game.api.card.Card;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 import java.util.function.Predicate;
@@ -89,7 +91,7 @@ public final class AvalonBots {
             return -1;
         }
         AvalonRole role = game.roleAt(leader);
-        if (role != null && role.isEvil() && (open & (1 << 3)) != 0
+        if (role != null && game.isEvilNow(leader) && (open & (1 << 3)) != 0
                 && game.teamSizeFor(3) >= 2 && evilSeats(game) >= 2) {
             return 3;
         }
@@ -140,7 +142,7 @@ public final class AvalonBots {
         }
         int score = seat == leader ? 12 : 0;
         int suspicion = suspicionOf(game, seat);
-        if (leaderRole.isEvil()) {
+        if (game.isEvilNow(leader)) {
             // Evil wants to be on the quest, and wants at least one ally there so a sabotage is
             // available; a clean-looking team is still worth having, so suspicion is a mild penalty.
             if (seat != leader && isEvil(game, seat)) {
@@ -186,7 +188,7 @@ public final class AvalonBots {
         }
         int team = game.getTeamMask();
         boolean onTeam = (team & (1 << voter)) != 0;
-        if (role.isEvil()) {
+        if (game.isEvilNow(voter)) {
             boolean allyOnTeam = false;
             boolean selfOnTeam = onTeam;
             for (int seat = 0; seat < game.seatCount(); seat++) {
@@ -233,7 +235,7 @@ public final class AvalonBots {
     }
 
     private static boolean decideFail(AvalonGame game, int member, AvalonRole role) {
-        if (!role.isEvil()) {
+        if (!game.isEvilNow(member)) {
             return false;
         }
         if (game.strength() == AvalonStrength.EASY) {
@@ -311,6 +313,194 @@ public final class AvalonBots {
     }
 
     // ---------------------------------------------------------------------------------------------
+    // Plot cards and the Lady of the Lake
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Who the leader hands its drawn cards to.
+     *
+     * <p>Distinct seats, because the rule forbids piling the batch onto one player; the order is
+     * shuffled so a bot's hand-outs are not always read off the ring's low seats.
+     */
+    public static List<Integer> choosePlotRecipients(AvalonGame game, int leader) {
+        List<Integer> seats = new ArrayList<>();
+        for (int seat = 0; seat < game.seatCount(); seat++) {
+            if (seat != leader) {
+                seats.add(seat);
+            }
+        }
+        Collections.shuffle(seats, RANDOM);
+        return seats;
+    }
+
+    /**
+     * One plot-card play from {@code seat}, encoded for the action payload, or {@code -1}.
+     *
+     * <p>Bots do not model the card game deeply: a takeover is worth a try now and then, and an
+     * information card is simply spent on a legal target. The value of plot cards is in what the
+     * <em>humans</em> do with them; a bot spending one is mostly here so a table of bots does not sit
+     * on a hand forever.
+     */
+    public static int choosePlotUse(AvalonGame game, int seat) {
+        List<AvalonPlot> hand = game.plotHand(seat);
+        if (hand.isEmpty()) {
+            return -1;
+        }
+        if (hand.contains(AvalonPlot.STRONG_LEADER)
+                && game.canUsePlot(seat, AvalonPlot.STRONG_LEADER, -1)
+                && RANDOM.nextInt(3) == 0) {
+            return AvalonGame.plotUseAction(AvalonPlot.STRONG_LEADER, -1);
+        }
+        List<AvalonPlot> options = new ArrayList<>(hand);
+        Collections.shuffle(options, RANDOM);
+        for (AvalonPlot card : options) {
+            // Passive (Opinion Maker) and the veto card have no target and are not this path's business.
+            if (!card.needsTarget()) {
+                continue;
+            }
+            int target = choosePlotTarget(game, seat, card);
+            if (target >= 0) {
+                return AvalonGame.plotUseAction(card, target);
+            }
+        }
+        return -1;
+    }
+
+    private static int choosePlotTarget(AvalonGame game, int seat, AvalonPlot card) {
+        List<Integer> candidates = new ArrayList<>();
+        for (int target = 0; target < game.seatCount(); target++) {
+            if (game.canUsePlot(seat, card, target)) {
+                candidates.add(target);
+            }
+        }
+        return candidates.isEmpty() ? -1 : candidates.get(RANDOM.nextInt(candidates.size()));
+    }
+
+    /** Whether a bot holding No Confidence spends it on the approved team. */
+    public static boolean chooseVeto(AvalonGame game, int seat) {
+        AvalonRole role = game.roleAt(seat);
+        if (role == null) {
+            return false;
+        }
+        // An evil seat wants the team sent back; a good seat only vetoes what looks plainly dirty.
+        return game.isEvilNow(seat) ? RANDOM.nextInt(3) != 0 : game.teamEvilCount() > 0 && RANDOM.nextInt(4) == 0;
+    }
+
+    /**
+     * Who the Lady examines: a good holder checks its strongest suspicion, an evil holder checks a
+     * seat it believes is good (checking an ally tells it nothing).
+     */
+    public static int chooseLadyTarget(AvalonGame game, int holder) {
+        int mask = game.ladyTargetMask();
+        if (mask == 0) {
+            return -1;
+        }
+        AvalonRole role = game.roleAt(holder);
+        boolean evil = role != null && game.isEvilNow(holder);
+        int best = -1;
+        int bestScore = Integer.MIN_VALUE;
+        for (int seat = 0; seat < game.seatCount(); seat++) {
+            if ((mask & (1 << seat)) == 0) {
+                continue;
+            }
+            int score = suspensionFor(game, holder, seat, evil) + RANDOM.nextInt(2);
+            if (score > bestScore) {
+                bestScore = score;
+                best = seat;
+            }
+        }
+        return best;
+    }
+
+    private static int suspensionFor(AvalonGame game, int holder, int seat, boolean holderEvil) {
+        if (holderEvil) {
+            // Reading a fellow evil tells the holder nothing it does not already know.
+            return game.isEvilNow(seat) ? -10 : 10;
+        }
+        return suspicionOf(game, seat);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The Royal Sword
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Who a bot leader gives the sword to: a team member on its own side if it can, otherwise any.
+     *
+     * <p>The sword is a public trust, so an evil leader wants it on an ally and a good leader wants it
+     * away from one -- the same truth-reading shortcut the rest of this class uses.
+     */
+    public static int chooseSwordHolder(AvalonGame game, int leader) {
+        int mask = game.swordEligibleMask();
+        if (mask == 0) {
+            return -1;
+        }
+        AvalonRole leaderRole = game.roleAt(leader);
+        boolean evil = leaderRole != null && game.isEvilNow(leader);
+        int best = -1;
+        int bestScore = Integer.MIN_VALUE;
+        for (int seat = 0; seat < game.seatCount(); seat++) {
+            if ((mask & (1 << seat)) == 0) {
+                continue;
+            }
+            int score = RANDOM.nextInt(3);
+            if (game.isEvilNow(seat) == evil) {
+                score += 10;
+            }
+            if (score > bestScore) {
+                bestScore = score;
+                best = seat;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Whether a bot holder flips a card, and which one: only when the flip changes the quest's outcome.
+     *
+     * <p>An evil holder turns a success into the fail that breaks the quest; a good holder turns the fail
+     * that would have broken it back into a success. When the quest is already decided either way the
+     * sword is worth more kept than spent, so the bot passes. Bots read the cards directly, as the rest of
+     * this class does.
+     */
+    public static int chooseSwordTarget(AvalonGame game, int holder) {
+        int mask = game.swordTargetMask();
+        if (mask == 0) {
+            return -1;
+        }
+        AvalonRole role = game.roleAt(holder);
+        boolean evil = role != null && game.isEvilNow(holder);
+        int fails = game.getQuestFails();
+        int required = game.requiredFails();
+        // The outcome is already settled the holder's way; the sword would only add information.
+        if (evil ? fails >= required : fails < required) {
+            return -1;
+        }
+        for (int seat = 0; seat < game.seatCount(); seat++) {
+            if ((mask & (1 << seat)) == 0) {
+                continue;
+            }
+            Card card = game.questCardOf(seat);
+            if (card == null) {
+                continue;
+            }
+            boolean success = AvalonCards.isSuccess(card);
+            if (evil) {
+                // A success becomes the fail that sinks the quest.
+                if (success && fails + 1 >= required) {
+                    return seat;
+                }
+            } else {
+                // A fail becomes a success, but only if that pulls the quest back above the line.
+                if (!success && fails - 1 < required) {
+                    return seat;
+                }
+            }
+        }
+        return -1;
+    }
+
+    // ---------------------------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------------------------
 
@@ -329,8 +519,7 @@ public final class AvalonBots {
     }
 
     private static boolean isEvil(AvalonGame game, int seat) {
-        AvalonRole role = game.roleAt(seat);
-        return role != null && role.isEvil();
+        return game.isEvilNow(seat);
     }
 
     /** How many sabotaged quests {@code seat} was part of — the table's only hard evidence. */

@@ -122,6 +122,28 @@
     {
       "card": {
         "components": {
+          "charta:suit": "myavalon:good",
+          "charta:rank": "myavalon:lancelot_good",
+          "charta:flipped": false
+        }
+      },
+      "texture": "myavalon:role/lancelot_good",
+      "translation": "card.myavalon.lancelot_good"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "myavalon:evil",
+          "charta:rank": "myavalon:lancelot_evil",
+          "charta:flipped": false
+        }
+      },
+      "texture": "myavalon:role/lancelot_evil",
+      "translation": "card.myavalon.lancelot_evil"
+    },
+    {
+      "card": {
+        "components": {
           "charta:suit": "myavalon:vote",
           "charta:rank": "myavalon:yes",
           "charta:flipped": false

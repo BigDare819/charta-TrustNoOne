@@ -38,10 +38,6 @@ public class AvalonTutorialScreen extends Screen {
     private static final int SOURCE_W = 1920;
     private static final int SOURCE_H = 1080;
 
-    /** Screen margin the picture keeps clear of the title and the button row. */
-    private static final int TOP = 26;
-    private static final int BOTTOM = 58;
-
     private static final List<ResourceLocation> TEXTURES = new ArrayList<>(PAGES);
 
     static {
@@ -53,6 +49,11 @@ public class AvalonTutorialScreen extends Screen {
 
     private final Screen parent;
     private int page;
+    /**
+     * Whether the page is shown at its native 100% size instead of fitted into the frame. Toggled with F;
+     * the frame's title and buttons are hidden under the page while it is on, which is the point.
+     */
+    private boolean nativeView;
 
     @Nullable
     private Button previous;
@@ -101,33 +102,92 @@ public class AvalonTutorialScreen extends Screen {
     @Override
     public void render(@NotNull GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         renderBackground(guiGraphics, mouseX, mouseY, partialTick);
-        // Full-resolution pages, mip-chained for the heavy downscale; see GuiTextureFilters.
-        GuiTextureFilters.ensure(new ResourceLocation[0], GuiTextureFilters.tutorialSprites());
+        // Full-resolution pages, filtered sharp: no mip chain, so the page is not blended with a
+        // quarter-resolution level; see GuiTextureFilters.
+        GuiTextureFilters.ensureSharp(GuiTextureFilters.tutorialSprites());
         super.render(guiGraphics, mouseX, mouseY, partialTick);
 
-        int areaX = 16;
-        int areaY = TOP;
-        int areaW = width - areaX * 2;
-        int areaH = height - TOP - BOTTOM;
-        float scale = Math.min(areaW / (float) SOURCE_W, areaH / (float) SOURCE_H);
-        int drawW = Math.round(SOURCE_W * scale);
-        int drawH = Math.round(SOURCE_H * scale);
-        int drawX = (width - drawW) / 2;
-        int drawY = areaY + (areaH - drawH) / 2;
-
+        // The page has to be drawn AFTER super.render, not before: super.render runs
+        // renderBackground again, whose blurred-background pass is a full-screen post effect over
+        // whatever is already in the framebuffer. A page painted before it would come out blurred; this
+        // is the "there is a blur filter on the pictures" report.
+        int[] box = pageBox();
         UiBlend.on();
-        guiGraphics.blit(TEXTURES.get(page), drawX, drawY, drawW, drawH,
+        guiGraphics.blit(TEXTURES.get(page), box[0], box[1], box[2], box[3],
                 0f, 0f, SOURCE_W, SOURCE_H, SOURCE_W, SOURCE_H);
 
+        if (nativeView) {
+            // Over the page, not under it: the page is drawn last and would cover anything the widget
+            // pass laid down.
+            Component hint = Component.translatable("tutorial.myavalon.native_hint");
+            guiGraphics.fill(width / 2 - font.width(hint) / 2 - 4, 2,
+                    width / 2 + font.width(hint) / 2 + 4, 2 + font.lineHeight + 2, 0x99000000);
+            guiGraphics.drawCenteredString(font, hint, width / 2, 4, 0xFFE0E0E0);
+            return;
+        }
         guiGraphics.drawCenteredString(font, title, width / 2, 8, 0xFFFFFFFF);
         guiGraphics.drawCenteredString(font,
                 Component.translatable("tutorial.myavalon.page", page + 1, PAGES),
                 width / 2, height - 44, 0xFFCFCFCF);
     }
 
+    /**
+     * Where the page is drawn: fitted inside the framed area under the title and above the button row.
+     *
+     * <p>It is <em>not</em> blown up to the window. A page at the window's size is, on a 1080p display,
+     * physically the same 1920x1080 the file is, but it also swallows the title and the navigation
+     * buttons, and the screen reads as one big picture rather than a page you turn. The picture therefore
+     * keeps its frame; the filtering (no mip chain -- see {@link GuiTextureFilters#ensureSharp}) is what
+     * keeps it from going soft on the way down.
+     */
+    private int[] pageBox() {
+        if (nativeView) {
+            return nativeBox();
+        }
+        int areaX = 16;
+        int areaY = 26;
+        int areaW = width - areaX * 2;
+        int areaH = height - 26 - 58;
+        // Never larger than the source's own pixels: on a window wider than 1920 the framed area would
+        // otherwise magnify the page past 100%, which is exactly the softness a picture viewer never
+        // shows. Capped, a large window sees the page 1:1, only a smaller one has to shrink it.
+        // One texel per physical pixel, expressed in GUI pixels.
+        float perTexel = 1f / guiScale();
+        float scale = Math.min(perTexel, Math.min(areaW / (float) SOURCE_W, areaH / (float) SOURCE_H));
+        int drawW = Math.round(SOURCE_W * scale);
+        int drawH = Math.round(SOURCE_H * scale);
+        return new int[]{(width - drawW) / 2, areaY + (areaH - drawH) / 2, drawW, drawH};
+    }
+
+    /**
+     * The page at exactly one texel per physical pixel, centred — what "F" switches to.
+     *
+     * <p>This is the size at which the file is shown un-resampled, i.e. what the desktop viewer shows at
+     * 100%. It cannot share the screen with the title and the button row (on a 1080p window it is the
+     * whole window), which is why it is a view you ask for rather than the default.
+     */
+    private int[] nativeBox() {
+        float guiScale = guiScale();
+        int drawW = Math.min(width, Math.round(SOURCE_W / guiScale));
+        int drawH = Math.round(drawW * (SOURCE_H / (float) SOURCE_W));
+        if (drawH > height) {
+            drawH = height;
+            drawW = Math.round(drawH * (SOURCE_W / (float) SOURCE_H));
+        }
+        return new int[]{(width - drawW) / 2, (height - drawH) / 2, drawW, drawH};
+    }
+
+    /** The window's GUI scale, guarded against a screen used before the window exists. */
+    private float guiScale() {
+        double scale = minecraft == null || minecraft.getWindow() == null
+                ? 1.0 : minecraft.getWindow().getGuiScale();
+        return (float) Math.max(1.0, scale);
+    }
+
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (button == 0 && super.mouseClicked(mouseX, mouseY, button)) {
+        // In the 100% view the widget row is hidden underneath the page, so its clicks must not fire.
+        if (!nativeView && button == 0 && super.mouseClicked(mouseX, mouseY, button)) {
             return true;
         }
         // The picture itself is the largest next/previous target on a mouse; the buttons stay for
@@ -140,11 +200,17 @@ public class AvalonTutorialScreen extends Screen {
     }
 
     private boolean insideImage(double mouseX, double mouseY) {
-        return mouseY >= TOP && mouseY < height - BOTTOM && mouseX >= 16 && mouseX < width - 16;
+        int[] box = pageBox();
+        return mouseX >= box[0] && mouseX < box[0] + box[2]
+                && mouseY >= box[1] && mouseY < box[1] + box[3];
     }
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (keyCode == GLFW.GLFW_KEY_F) {
+            nativeView = !nativeView;
+            return true;
+        }
         if (keyCode == GLFW.GLFW_KEY_LEFT) {
             turn(-1);
             return true;

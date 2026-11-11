@@ -11,6 +11,7 @@ import net.minecraft.client.renderer.texture.MipmapGenerator;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.packs.resources.Resource;
 import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL12;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -121,14 +122,39 @@ public final class GuiTextureFilters {
             return;
         }
         for (ResourceLocation id : pixelArt) {
-            Schedule(id, minecraft, true);
+            Schedule(id, minecraft, PIXEL);
         }
         for (ResourceLocation id : painted) {
-            Schedule(id, minecraft, false);
+            Schedule(id, minecraft, PAINTED);
         }
     }
 
-    private static void Schedule(ResourceLocation id, Minecraft minecraft, boolean pixelArt) {
+    /**
+     * Filters large screenshots meant to be read: no mip chain at all, linear minification, nearest
+     * magnification.
+     *
+     * <p>The mipmapped filter the painted art gets is the right answer for a board drawn 5x down, but it
+     * is the wrong answer for a 1920x1080 page shown at almost its own size: trilinear sampling at a
+     * ratio near 1 still mixes in a quarter-resolution level, and that reads as the whole page being
+     * soft -- the "why is this blurry when the viewer is sharp" report. With no chain, a page at 1:1 is
+     * byte-for-byte its file and a mild downscale is plain bilinear, which is what desktop viewers do
+     * before they reach for Lanczos.
+     */
+    public static void ensureSharp(ResourceLocation[] ids) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft == null || minecraft.getTextureManager() == null) {
+            return;
+        }
+        for (ResourceLocation id : ids) {
+            Schedule(id, minecraft, SHARP);
+        }
+    }
+
+    private static final int PAINTED = 0;
+    private static final int PIXEL = 1;
+    private static final int SHARP = 2;
+
+    private static void Schedule(ResourceLocation id, Minecraft minecraft, int mode) {
         AbstractTexture texture = minecraft.getTextureManager().getTexture(id);
         if (texture == null || FILTERED.get(id) == texture) {
             return;
@@ -140,10 +166,10 @@ public final class GuiTextureFilters {
         // The byte loops (PNG decode + the whole mip chain) are pure CPU and run on the common pool, so
         // the frame that first draws the table does not stall on the two 2 MB board scans. Only the GL
         // upload waits for the render thread, and it is a handful of texSubImage2D calls.
-        CompletableFuture.runAsync(() -> build(id, texture, pixelArt));
+        CompletableFuture.runAsync(() -> build(id, texture, mode));
     }
 
-    private static void build(ResourceLocation id, AbstractTexture texture, boolean pixelArt) {
+    private static void build(ResourceLocation id, AbstractTexture texture, int mode) {
         Minecraft minecraft = Minecraft.getInstance();
         Optional<Resource> resource = minecraft.getResourceManager().getResource(id);
         if (resource.isEmpty()) {
@@ -163,13 +189,16 @@ public final class GuiTextureFilters {
                 Integer.numberOfTrailingZeros(Integer.highestOneBit(Math.min(baseWidth, baseHeight))));
         // generateMipLevels only fills the array when it is shorter than maxLevel+1, so hand it a
         // one-element array and take back the full chain it allocates. All CPU, all on this worker.
-        NativeImage[] levels = MipmapGenerator.generateMipLevels(new NativeImage[]{base}, maxLevel);
+        // The sharp mode never builds a chain: see ensureSharp.
+        NativeImage[] levels = mode == SHARP
+                ? new NativeImage[]{base}
+                : MipmapGenerator.generateMipLevels(new NativeImage[]{base}, maxLevel);
         // levels[0] *is* base, so it is not closed here -- uploadLevels closes the whole chain after upload.
         // The upload binds the GL id, so it is marshalled onto the render thread. From there the id is
         // allocated, storage prepared and every level uploaded; the object is only marked filtered once the
         // whole chain is in place.
         Runnable upload = () -> {
-            uploadLevels(texture, levels, pixelArt);
+            uploadLevels(texture, levels, mode);
             PENDING.remove(id);
             FILTERED.put(id, texture);
         };
@@ -180,7 +209,7 @@ public final class GuiTextureFilters {
         }
     }
 
-    private static void uploadLevels(AbstractTexture texture, NativeImage[] levels, boolean pixelArt) {
+    private static void uploadLevels(AbstractTexture texture, NativeImage[] levels, int mode) {
         GlStateManager._bindTexture(texture.getId());
         // Allocates storage for level 0..MAX_MIP_LEVEL (TextureUtil.prepareImage loops _texImage2D with a
         // null buffer) and pins GL_TEXTURE_MAX_LEVEL/BASE_LEVEL/MAX_LOD there. This has to happen *before*
@@ -203,8 +232,17 @@ public final class GuiTextureFilters {
         // blur=false keeps the magnification filter at GL_NEAREST so the sprites' authored pixels stay
         // crisp; the min filter still reaches the mip chain for the heavy downscale. Linear magnification
         // here is what made the pixel art look soft.
+        if (mode == SHARP) {
+            // No chain was uploaded; the base level is the whole texture. Linear minification, nearest
+            // magnification, and MAX_LEVEL 0 so nothing can sample a level that does not exist.
+            GlStateManager._bindTexture(texture.getId());
+            GlStateManager._texParameter(GL11.GL_TEXTURE_2D, GL12.GL_TEXTURE_MAX_LEVEL, 0);
+            GlStateManager._texParameter(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_LINEAR);
+            GlStateManager._texParameter(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_LINEAR);
+            return;
+        }
         texture.setFilter(false, true);
-        if (pixelArt) {
+        if (mode == PIXEL) {
             // ...and the min filter is then narrowed to a single level for pixel art: NEAREST_MIPMAP_LINEAR
             // (what setFilter(false, true) leaves behind) averages the two levels either side of the draw
             // ratio, which on hard-edged 13x-scaled art reads as a resampled picture. Asserted by hand

@@ -19,7 +19,6 @@ public class MyAvalonClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         MenuScreens.register(MyAvalonMod.AVALON_MENU, AvalonScreen::new);
-        MyAvalonDebug.install();
     }
 
 }

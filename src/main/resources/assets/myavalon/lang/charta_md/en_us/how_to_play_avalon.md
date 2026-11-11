@@ -51,6 +51,14 @@ Turn on **Designated quests** in the table options before the game starts. Then,
 - On 7+ players, quest 4 still needs two fail cards to fail.
 - Lit slots are the available quests; the solid highlight is the leader's current pick.
 
+### **Optional rules: plot cards, the Angel, loyalty cards, the King's Sword and Wolf**
+
+- **Plot cards**: at the start of every quest round the leader draws 1-3 cards and hands each to a different player, one per player; everybody sees who holds what. A rejected team does not draw again. Each card lights up in its own window: before the vote, during the quest, after a team is approved, or for the whole game. Five or six players use the seven-card base set; seven or more the full fifteen.
+- **Angel**: starts with the player on the first leader's right. Before the third, fourth and fifth quests its holder must mark a player and press the middle Confirm -- there is no skip: a loyalty card flies to the middle and turns over, then the token passes to that player, and the next proposal waits for the card. Three uses per game, and a player who has used the Angel can never be examined.
+- **Loyalty cards**: whenever the Angel or the plot cards are on, a check is shown as the blue (good) or red (evil) loyalty card instead of a character card. There is no separate switch, and Merlin's identity survives being proven good.
+- **King's Sword**: while picking the team the leader gives the sword to another member of it by clicking that member's avatar; the team cannot be confirmed until the sword has been given. Once every quest card is down and before the reveal, the holder may name one member and flip that card (success becomes fail and vice versa), then see what it originally was. Using it is optional; click your own plate or the sword to pass; a card played face up cannot be flipped.
+- **Wolf**: one plain Villager becomes the Kind Wolf and one plain Minion becomes the Evil Wolf. After each of the second, third and fourth quests a loyalty card is turned over: three say no change, two say switch. On a switch both wolves cross to the other side at once - the Kind Wolf may now play a fail, the Evil Wolf may only play a success - and quest legality, bot judgement and final win credit all follow the new side. What Merlin and the evil seats were shown at the deal stays frozen, so their information can go stale. The status row says "sides unchanged" or "sides switched", but never which two seats the wolves are. A custom setup needs both a Villager and a Minion, or the game has no wolves.
+
 ### **Win-rate records:**
 
 The server records the result of every finished game for every real player in `myavalon-stats.json` in the world folder. **A game abandoned before a side wins is not counted, and neither is a game with even one bot seat.**
