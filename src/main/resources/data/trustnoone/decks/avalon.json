@@ -1,0 +1,211 @@
+{
+  "rarity": "common",
+  "tradeable": true,
+  "texture": "trustnoone:avalon",
+  "translation": "deck.trustnoone.avalon",
+  "suits": [
+    {
+      "suit": "trustnoone:good",
+      "texture": "trustnoone:good",
+      "translation": "suit.trustnoone.good"
+    },
+    {
+      "suit": "trustnoone:evil",
+      "texture": "trustnoone:evil",
+      "translation": "suit.trustnoone.evil"
+    },
+    {
+      "suit": "trustnoone:vote",
+      "texture": "trustnoone:vote",
+      "translation": "suit.trustnoone.vote"
+    },
+    {
+      "suit": "trustnoone:quest",
+      "texture": "trustnoone:quest",
+      "translation": "suit.trustnoone.quest"
+    },
+    {
+      "suit": "trustnoone:token",
+      "texture": "trustnoone:token",
+      "translation": "suit.trustnoone.token"
+    }
+  ],
+  "cards": [
+    {
+      "card": {
+        "components": {
+          "charta:suit": "trustnoone:good",
+          "charta:rank": "trustnoone:merlin",
+          "charta:flipped": false
+        }
+      },
+      "texture": "trustnoone:role/merlin",
+      "translation": "card.trustnoone.merlin"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "trustnoone:good",
+          "charta:rank": "trustnoone:percival",
+          "charta:flipped": false
+        }
+      },
+      "texture": "trustnoone:role/percival",
+      "translation": "card.trustnoone.percival"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "trustnoone:good",
+          "charta:rank": "trustnoone:loyalist",
+          "charta:flipped": false
+        }
+      },
+      "texture": "trustnoone:role/loyalist",
+      "translation": "card.trustnoone.loyalist"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "trustnoone:evil",
+          "charta:rank": "trustnoone:assassin",
+          "charta:flipped": false
+        }
+      },
+      "texture": "trustnoone:role/assassin",
+      "translation": "card.trustnoone.assassin"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "trustnoone:evil",
+          "charta:rank": "trustnoone:morgana",
+          "charta:flipped": false
+        }
+      },
+      "texture": "trustnoone:role/morgana",
+      "translation": "card.trustnoone.morgana"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "trustnoone:evil",
+          "charta:rank": "trustnoone:mordred",
+          "charta:flipped": false
+        }
+      },
+      "texture": "trustnoone:role/mordred",
+      "translation": "card.trustnoone.mordred"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "trustnoone:evil",
+          "charta:rank": "trustnoone:oberon",
+          "charta:flipped": false
+        }
+      },
+      "texture": "trustnoone:role/oberon",
+      "translation": "card.trustnoone.oberon"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "trustnoone:evil",
+          "charta:rank": "trustnoone:minion",
+          "charta:flipped": false
+        }
+      },
+      "texture": "trustnoone:role/minion",
+      "translation": "card.trustnoone.minion"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "trustnoone:good",
+          "charta:rank": "trustnoone:lancelot_good",
+          "charta:flipped": false
+        }
+      },
+      "texture": "trustnoone:role/lancelot_good",
+      "translation": "card.trustnoone.lancelot_good"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "trustnoone:evil",
+          "charta:rank": "trustnoone:lancelot_evil",
+          "charta:flipped": false
+        }
+      },
+      "texture": "trustnoone:role/lancelot_evil",
+      "translation": "card.trustnoone.lancelot_evil"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "trustnoone:vote",
+          "charta:rank": "trustnoone:yes",
+          "charta:flipped": false
+        }
+      },
+      "texture": "trustnoone:vote_yes",
+      "translation": "card.trustnoone.vote_yes"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "trustnoone:vote",
+          "charta:rank": "trustnoone:no",
+          "charta:flipped": false
+        }
+      },
+      "texture": "trustnoone:vote_no",
+      "translation": "card.trustnoone.vote_no"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "trustnoone:quest",
+          "charta:rank": "trustnoone:success",
+          "charta:flipped": false
+        }
+      },
+      "texture": "trustnoone:quest_success",
+      "translation": "card.trustnoone.quest_success"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "trustnoone:quest",
+          "charta:rank": "trustnoone:fail",
+          "charta:flipped": false
+        }
+      },
+      "texture": "trustnoone:quest_fail",
+      "translation": "card.trustnoone.quest_fail"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "trustnoone:token",
+          "charta:rank": "trustnoone:crown",
+          "charta:flipped": false
+        }
+      },
+      "texture": "trustnoone:token/crown",
+      "translation": "card.trustnoone.crown"
+    },
+    {
+      "card": {
+        "components": {
+          "charta:suit": "trustnoone:token",
+          "charta:rank": "trustnoone:iron_nugget",
+          "charta:flipped": false
+        }
+      },
+      "texture": "trustnoone:token/iron_nugget",
+      "translation": "card.trustnoone.iron_nugget"
+    }
+  ]
+}

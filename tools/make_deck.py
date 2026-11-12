@@ -11,13 +11,13 @@ import json
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(HERE, "..", "src", "main", "resources", "data", "myavalon", "decks")
+OUT = os.path.join(HERE, "..", "src", "main", "resources", "data", "trustnoone", "decks")
 
 SUITS = {
-    "good": ("myavalon:good", "suit.myavalon.good"),
-    "evil": ("myavalon:evil", "suit.myavalon.evil"),
-    "vote": ("myavalon:vote", "suit.myavalon.vote"),
-    "quest": ("myavalon:quest", "suit.myavalon.quest"),
+    "good": ("trustnoone:good", "suit.trustnoone.good"),
+    "evil": ("trustnoone:evil", "suit.trustnoone.evil"),
+    "vote": ("trustnoone:vote", "suit.trustnoone.vote"),
+    "quest": ("trustnoone:quest", "suit.trustnoone.quest"),
 }
 
 # Role card: (role, suit, how many copies the deck holds). The counts are the worst case over a full
@@ -65,26 +65,26 @@ def build(name):
         for _ in range(copies):
             cards.append(card_entry(
                 SUITS[suit][0],
-                f"myavalon:{role}",
-                f"myavalon:role/{role}",
-                f"card.myavalon.{role}",
+                f"trustnoone:{role}",
+                f"trustnoone:role/{role}",
+                f"card.trustnoone.{role}",
             ))
     for rank, suit, texture, copies in FACES:
         for _ in range(copies):
             cards.append(card_entry(
                 SUITS[suit][0],
-                f"myavalon:{rank}",
-                f"myavalon:{texture}",
-                f"card.myavalon.{texture}",
+                f"trustnoone:{rank}",
+                f"trustnoone:{texture}",
+                f"card.trustnoone.{texture}",
             ))
 
     deck = {
         "rarity": "common",
         "tradeable": True,
-        "texture": "myavalon:avalon",
-        "translation": f"deck.myavalon.{name}",
+        "texture": "trustnoone:avalon",
+        "translation": f"deck.trustnoone.{name}",
         "suits": [
-            {"suit": sid, "texture": f"myavalon:{key}", "translation": key_}
+            {"suit": sid, "texture": f"trustnoone:{key}", "translation": key_}
             for key, (sid, key_) in SUITS.items()
         ],
         "cards": cards,

@@ -15,8 +15,8 @@ import zipfile
 
 TINY = ('C:/Users/BigMer/.gradle/caches/fabric-loom/1.21.1/'
         'loom.mappings.1_21_1.layered+hash.2198-v2/mappings.tiny')
-JAR = 'build/libs/myavalon-fabric-1.21.1-1.0.0-sources.jar'
-TARGET = sys.argv[1] if len(sys.argv) > 1 else 'dev/myavalon/game/AvalonGame.java'
+JAR = 'build/libs/trustnoone-fabric-1.21.1-1.0.0-sources.jar'
+TARGET = sys.argv[1] if len(sys.argv) > 1 else 'dev/trustnoone/game/AvalonGame.java'
 OUT = 'src/main/java/' + TARGET
 
 classes = {}

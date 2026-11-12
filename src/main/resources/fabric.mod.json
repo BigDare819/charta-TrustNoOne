@@ -17,10 +17,10 @@
   "environment": "*",
   "entrypoints": {
     "main": [
-      "dev.myavalon.MyAvalonMod"
+      "dev.trustnoone.TrustNoOneMod"
     ],
     "client": [
-      "dev.myavalon.MyAvalonClient"
+      "dev.trustnoone.TrustNoOneClient"
     ]
   },
   "depends": {
@@ -31,6 +31,6 @@
     "charta": "${charta_version_range}"
   },
   "mixins": [
-    "myavalon.mixins.json"
+    "trustnoone.mixins.json"
   ]
 }

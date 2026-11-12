@@ -1,6 +1,6 @@
 import io
 
-p = 'src/main/java/dev/myavalon/game/AvalonGame.java'
+p = 'src/main/java/dev/trustnoone/game/AvalonGame.java'
 s = io.open(p, encoding='utf-8').read()
 
 # (a) stats mirror slots
@@ -56,13 +56,13 @@ new_post = '''    private void postSummary() {
         List<Component> lines = new ArrayList<>();
         boolean goodWon = winner == SIDE_GOOD;
         lines.add(Component.translatable(goodWon
-                        ? "status.myavalon.good_wins" : "status.myavalon.evil_wins")
+                        ? "status.trustnoone.good_wins" : "status.trustnoone.evil_wins")
                 .withStyle(ChatFormatting.BOLD)
                 .withStyle(style -> style.withColor(goodWon ? SUMMARY_GOOD : SUMMARY_EVIL)));
 
         for (int i = 0; i < roles.size(); i++) {
             boolean evil = roles.get(i).isEvil();
-            lines.add(Component.translatable("message.myavalon.summary_role", names.get(i),
+            lines.add(Component.translatable("message.trustnoone.summary_role", names.get(i),
                             Component.translatable(roles.get(i).getTranslationKey()))
                     .withStyle(style -> style.withColor(evil ? SUMMARY_EVIL : SUMMARY_GOOD)));
         }
@@ -76,14 +76,14 @@ new_post = '''    private void postSummary() {
                 failed++;
             }
         }
-        lines.add(Component.translatable("message.myavalon.summary_quest_success", succeeded)
+        lines.add(Component.translatable("message.trustnoone.summary_quest_success", succeeded)
                 .withStyle(style -> style.withColor(SUMMARY_GOOD)));
-        lines.add(Component.translatable("message.myavalon.summary_quest_fail", failed)
+        lines.add(Component.translatable("message.trustnoone.summary_quest_fail", failed)
                 .withStyle(style -> style.withColor(SUMMARY_EVIL)));
 
         // Two tables of judgement, one about reading a team and one about building it, printed the same way.
-        rankInto(lines, names, roles, sharpNo, "message.myavalon.summary_ranking");
-        rankInto(lines, names, roles, cleanTeams, "message.myavalon.summary_clean_teams");
+        rankInto(lines, names, roles, sharpNo, "message.trustnoone.summary_ranking");
+        rankInto(lines, names, roles, cleanTeams, "message.trustnoone.summary_clean_teams");
         return lines;
     }
 
@@ -106,7 +106,7 @@ new_post = '''    private void postSummary() {
         for (int place = 0; place < order.length; place++) {
             int seat = order[place];
             boolean evil = roles.get(seat).isEvil();
-            lines.add(Component.translatable("message.myavalon.summary_rank", place + 1,
+            lines.add(Component.translatable("message.trustnoone.summary_rank", place + 1,
                             names.get(seat), counts[seat])
                     .withStyle(style -> style.withColor(evil ? SUMMARY_EVIL : SUMMARY_GOOD)));
         }
@@ -154,10 +154,10 @@ else:
 
 # the rejection branch joins the red act
 old_rejects = """            if (rejects >= MAX_REJECTS) {
-                finish(SIDE_EVIL, "message.myavalon.evil_by_rejects");"""
+                finish(SIDE_EVIL, "message.trustnoone.evil_by_rejects");"""
 new_rejects = """            if (rejects >= MAX_REJECTS) {
                 endedByRedAct = true;
-                finish(SIDE_EVIL, "message.myavalon.evil_by_rejects");"""
+                finish(SIDE_EVIL, "message.trustnoone.evil_by_rejects");"""
 assert s.count(old_rejects) == 1, 'rejects'
 s = s.replace(old_rejects, new_rejects)
 

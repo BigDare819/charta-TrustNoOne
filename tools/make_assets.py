@@ -1,4 +1,4 @@
-"""Generates the MyAvalon deck assets.
+"""Generates the TrustNoOne deck assets.
 
 Two kinds of output, both in Charta's own formats:
 
@@ -30,8 +30,8 @@ from PIL import Image, ImageDraw
 HERE = os.path.dirname(os.path.abspath(__file__))
 RES = os.path.join(HERE, "..", "src", "main", "resources")
 SRC = "C:/Users/BigMer/Desktop/charta/阿瓦隆"
-FULL_DIR = os.path.join(RES, "assets", "myavalon", "fullcard")
-GUI_DIR = os.path.join(RES, "assets", "myavalon", "textures", "gui")
+FULL_DIR = os.path.join(RES, "assets", "trustnoone", "fullcard")
+GUI_DIR = os.path.join(RES, "assets", "trustnoone", "textures", "gui")
 
 # The size header read back by ``ScaledImages``. Kept in front of the gzip stream on purpose: the reader
 # checks for it before decompressing, and the Java ``compress()`` mixin writes it back the same way.
@@ -355,9 +355,9 @@ def deck_back():
 
 
 def main():
-    card_dir = os.path.join(RES, "data", "myavalon", "images", "card")
-    suit_dir = os.path.join(RES, "data", "myavalon", "images", "suit")
-    deck_dir = os.path.join(RES, "data", "myavalon", "images", "deck")
+    card_dir = os.path.join(RES, "data", "trustnoone", "images", "card")
+    suit_dir = os.path.join(RES, "data", "trustnoone", "images", "suit")
+    deck_dir = os.path.join(RES, "data", "trustnoone", "images", "deck")
 
     def emit(rel, image, blob_dir, ext, source=None, english=None):
         """Writes a blob plus its full-colour texture. ``source``/``english`` are the shipped art files: when
@@ -424,8 +424,8 @@ def main():
 
     # The pack's icon, for the mod icon and the game button. Copied verbatim -- the pack draws it at the
     # size it wants, and nothing here is allowed to resample.
-    os.makedirs(os.path.join(RES, "assets", "myavalon"), exist_ok=True)
-    copy_file(os.path.join(SRC, ICON), os.path.join(RES, "assets", "myavalon", "icon.png"))
+    os.makedirs(os.path.join(RES, "assets", "trustnoone"), exist_ok=True)
+    copy_file(os.path.join(SRC, ICON), os.path.join(RES, "assets", "trustnoone", "icon.png"))
     os.makedirs(os.path.join(GUI_DIR, "game"), exist_ok=True)
     copy_file(os.path.join(SRC, ICON), os.path.join(GUI_DIR, "game", "avalon.png"))
     print("icon + game button + mission marker")

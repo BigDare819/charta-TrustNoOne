@@ -7,7 +7,7 @@
 import io
 
 # ---------------------------------------------------------------- AvalonMenu: the two counters
-p = 'src/main/java/dev/myavalon/game/AvalonMenu.java'
+p = 'src/main/java/dev/trustnoone/game/AvalonMenu.java'
 s = io.open(p, encoding='utf-8').read()
 anchor = """    /** Seats that have answered "no" in the running vote, as a bitmask. */"""
 new = """    /** How many times {@code seat} voted a team carrying evil down -- see {@code AvalonGame.sharpNo}. */
@@ -26,7 +26,7 @@ s = s.replace(anchor, new)
 io.open(p, 'w', encoding='utf-8', newline='\n').write(s)
 
 # ---------------------------------------------------------------- AvalonScreen
-p = 'src/main/java/dev/myavalon/game/AvalonScreen.java'
+p = 'src/main/java/dev/trustnoone/game/AvalonScreen.java'
 s = io.open(p, encoding='utf-8').read()
 
 # (1) the red act's predicate: any evil win that is not the knife's

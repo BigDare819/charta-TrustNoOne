@@ -112,7 +112,7 @@ processResources {
 // restarted to load new code anyway, fall back to writing the bytes in place
 // (which Windows does allow) and say so.
 tasks.register('deploy') {
-    group = 'myavalon'
+    group = 'trustnoone'
     description = 'Builds the mod and swaps it into the PCL2 1.21.1-Fabric instance.'
     dependsOn tasks.named('build')
 
